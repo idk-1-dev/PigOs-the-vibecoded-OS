@@ -1,0 +1,44 @@
+Third-party Components in pigOS
+
+1. lwIP TCP/IP Stack
+   - Directory: pigOS/lwip/
+   - License: BSD-style (see pigOS/lwip/COPYING)
+   - Copyright: 2001, 2002 Swedish Institute of Computer Science
+   - URL: https://savannah.nongnu.org/projects/lwip/
+
+2. bash-completion
+   - Directory: pigOS/bash-completion/bash-completion-main/
+   - License: GNU GPLv2 (see pigOS/bash-completion/bash-completion-main/COPYING)
+   - Copyright: 1989, 1991 Free Software Foundation, Inc.
+   - URL: https://github.com/scop/bash-completion
+
+3. stb_truetype (Public Domain)
+   - Files: 
+     - pigOS/display-server/stb_truetype.h
+     - pigOS/project/display-server/stb_truetype.h
+     - pigOS/vdm/project/display-server/stb_truetype.h
+   - License: Public Domain
+   - URL: https://github.com/nothings/stb
+
+4. larpshell (lash)
+   - Directory: pigOS/shell/larpshell/
+   - License: GPLv3 (see README.md)
+   - Note: Go-based shell implementation
+
+5. vdm - Custom Display Server
+   - Directory: pigOS/vdm/project/
+   - Origin: Based on erofs project display server code (credits to erofs project)
+   - License: No explicit license (custom implementation)
+   - Note: Minimal display server built from scratch in C
+
+6. Various example/test files from lwIP contributions
+   - Located throughout pigOS/lwip/contrib/
+   - Licenses vary per component (see individual files)
+
+7. PigOS Core Components (GPLv2)
+   - Directories: pigOS/kernel/, pigOS/shell/ (excluding larpshell), pigOS/drivers/, pigOS/crypto/, pigOS/display-server/, pigOS/wm/
+   - License: GPLv2 (see main LICENSE file)
+   - Copyright: 2025 idk-1-dev
+
+Note: PigOS core components are licensed under GPLv2 as stated in the main LICENSE file.
+Third-party components retain their respective licenses as documented above.
