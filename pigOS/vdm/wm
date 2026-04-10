@@ -1,0 +1,16 @@
+#!/bin/bash
+# wm - Launch VDM Display Server with lash shell
+# This script is called when user types 'wm' in pigOS shell
+# On host system, it launches the VDM display server
+
+VDM_DIR="/home/User/vibecoding-comp/vdm/project"
+RUN_SCRIPT="$VDM_DIR/run-dm.sh"
+
+if [ ! -f "$RUN_SCRIPT" ]; then
+    echo "Error: VDM run script not found at $RUN_SCRIPT"
+    echo "Make sure vdm.zip has been extracted to vibecoding-comp/"
+    exit 1
+fi
+
+# Execute the VDM launcher
+exec bash "$RUN_SCRIPT"

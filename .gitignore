@@ -1,0 +1,31 @@
+# Build artifacts
+build/
+*.o
+*.bin
+*.iso
+*.img
+*.elf
+pigOS.iso
+
+# Editor files
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Logs
+*.log
+
+# Temp
+/tmp/
+*.bak
+*.orig
+
+# Output ZIPs
+pigOS-*.zip

@@ -1,0 +1,41 @@
+pigOS Project Known Issues
+=========================
+
+CURRENT ISSUES
+-------------
+
+1. Keyboard passed to TTY - Getting Logged Out
+   - Keyboard input sometimes gets passed to TTY
+   - Causes unexpected logout behavior
+   - May cause logged out state unexpectedly
+   - Font may get corrupted from TTY shortcuts
+
+2. Font Corruption
+   - TTY shortcuts getting passed through
+   - Leading to messed up font display
+   - Needs fix in input handling
+
+3. VDM Desktop Issues
+   - VDM issues on real hardware
+   - Works in QEMU but not bare metal
+   - Requires proper GPU/driver setup
+
+FIXED ISSUES
+----------
+
+Password Login (FIXED)
+   - Login now validates against user database
+   - Previously was hardcoded to root/toor
+   - passwd command updates user database
+   - Login properly verifies stored passwords
+
+LOGIN SYSTEM
+------------
+- Shell login uses users.h database
+- Desktop (wm/vdm) login now works with:
+  Default: root / toor
+  Change: passwd root
+
+BUILD ISSUES (false positives - ignore)
+- LSP errors about missing includes are build path issues
+- Actual build works fine with Makefile

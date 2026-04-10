@@ -1,0 +1,418 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/signal"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"unsafe"
+)
+
+type JobState int
+
+const (
+	JobRunning JobState = iota
+	JobStopped
+	JobDone
+)
+
+type Job struct {
+	Number   int
+	PID      int
+	PGID     int
+	State    JobState
+	Command  string
+	ExitCode int
+}
+
+var (
+	jobTable   []*Job
+	nextJobNum int
+	jobMu      sync.Mutex
+
+	fgPIDs   map[int]bool
+	fgActive bool
+	fgMu     sync.Mutex
+)
+
+func initJobControl() {
+	fgPIDs = make(map[int]bool)
+
+	signal.Ignore(syscall.SIGTTOU)
+
+	syscall.Setpgid(0, 0)
+	tcsetpgrp(int(os.Stdin.Fd()), syscall.Getpgrp())
+
+	sigCh := make(chan os.Signal, 32)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTSTP)
+	go func() {
+		for sig := range sigCh {
+			s := sig.(syscall.Signal)
+			fgMu.Lock()
+			active := fgActive
+			pids := make([]int, 0, len(fgPIDs))
+			for p := range fgPIDs {
+				pids = append(pids, p)
+			}
+			fgMu.Unlock()
+			if active && len(pids) > 0 {
+				for _, p := range pids {
+					syscall.Kill(p, s)
+				}
+			} else if s == syscall.SIGTSTP {
+				signal.Stop(sigCh)
+				syscall.Kill(syscall.Getpid(), syscall.SIGTSTP)
+				signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTSTP)
+			}
+		}
+	}()
+}
+
+func addJob(pid, pgid int, state JobState, command string) *Job {
+	jobMu.Lock()
+	defer jobMu.Unlock()
+
+	cleanupDoneJobsLocked()
+
+	usedNums := make(map[int]bool)
+	for _, j := range jobTable {
+		usedNums[j.Number] = true
+	}
+	for {
+		nextJobNum++
+		if !usedNums[nextJobNum] {
+			break
+		}
+	}
+
+	job := &Job{
+		Number:  nextJobNum,
+		PID:     pid,
+		PGID:    pgid,
+		State:   state,
+		Command: command,
+	}
+	jobTable = append(jobTable, job)
+	return job
+}
+
+func findJobByNumber(num int) *Job {
+	jobMu.Lock()
+	defer jobMu.Unlock()
+	for _, j := range jobTable {
+		if j.Number == num && j.State != JobDone {
+			return j
+		}
+	}
+	return nil
+}
+
+func findJobByPID(pid int) *Job {
+	jobMu.Lock()
+	defer jobMu.Unlock()
+	for _, j := range jobTable {
+		if j.PID == pid && j.State != JobDone {
+			return j
+		}
+	}
+	return nil
+}
+
+func markJobDone(pid int, exitCode int) {
+	jobMu.Lock()
+	defer jobMu.Unlock()
+	for _, j := range jobTable {
+		if j.PID == pid {
+			j.State = JobDone
+			j.ExitCode = exitCode
+			break
+		}
+	}
+}
+
+func markJobStopped(pid int) {
+	jobMu.Lock()
+	defer jobMu.Unlock()
+	for _, j := range jobTable {
+		if j.PID == pid {
+			j.State = JobStopped
+			break
+		}
+	}
+}
+
+func markJobRunningByPID(pid int) {
+	jobMu.Lock()
+	defer jobMu.Unlock()
+	for _, j := range jobTable {
+		if j.PID == pid {
+			j.State = JobRunning
+			break
+		}
+	}
+}
+
+func getMostRecentJob() *Job {
+	jobMu.Lock()
+	defer jobMu.Unlock()
+	for i := len(jobTable) - 1; i >= 0; i-- {
+		if jobTable[i].State == JobStopped {
+			return jobTable[i]
+		}
+	}
+	for i := len(jobTable) - 1; i >= 0; i-- {
+		if jobTable[i].State == JobRunning {
+			return jobTable[i]
+		}
+	}
+	return nil
+}
+
+func parseJobSpec(spec string) (*Job, error) {
+	if len(spec) >= 2 && spec[0] == '%' {
+		num, err := strconv.Atoi(spec[1:])
+		if err != nil {
+			return nil, fmt.Errorf("%s: no such job", spec)
+		}
+		job := findJobByNumber(num)
+		if job == nil {
+			return nil, fmt.Errorf("%s: no such job", spec)
+		}
+		return job, nil
+	}
+	pid, err := strconv.Atoi(spec)
+	if err != nil {
+		return nil, fmt.Errorf("%s: argument must be %%job or pid", spec)
+	}
+	job := findJobByPID(pid)
+	if job == nil {
+		return nil, fmt.Errorf("%s: no such job", spec)
+	}
+	return job, nil
+}
+
+func printJobs() {
+	jobMu.Lock()
+	defer jobMu.Unlock()
+
+	var active []*Job
+	for _, j := range jobTable {
+		if j.State != JobDone {
+			active = append(active, j)
+		}
+	}
+
+	if len(active) == 0 {
+		return
+	}
+
+	sort.Slice(active, func(i, j int) bool {
+		return active[i].Number < active[j].Number
+	})
+
+	for i, j := range active {
+		marker := " "
+		if i == len(active)-1 {
+			marker = "+"
+		} else if i == len(active)-2 {
+			marker = "-"
+		}
+
+		stateStr := "Running"
+		if j.State == JobStopped {
+			stateStr = "Stopped"
+		}
+
+		fmt.Printf("[%d]%s  %-9s %s\n", j.Number, marker, stateStr, j.Command)
+	}
+}
+
+func cleanupDoneJobsLocked() {
+	var alive []*Job
+	for _, j := range jobTable {
+		if j.State != JobDone {
+			alive = append(alive, j)
+		}
+	}
+	jobTable = alive
+}
+
+func setFgPIDs(pids []int) {
+	fgMu.Lock()
+	defer fgMu.Unlock()
+	fgPIDs = make(map[int]bool)
+	for _, p := range pids {
+		fgPIDs[p] = true
+	}
+	fgActive = true
+}
+
+func clearFgPIDs() {
+	fgMu.Lock()
+	defer fgMu.Unlock()
+	fgPIDs = make(map[int]bool)
+	fgActive = false
+}
+
+func isForegroundPID(pid int) bool {
+	fgMu.Lock()
+	defer fgMu.Unlock()
+	return fgPIDs[pid]
+}
+
+func handleChildReap(pid int, status syscall.WaitStatus) {
+	job := findJobByPID(pid)
+	if job == nil {
+		return
+	}
+
+	if status.Stopped() {
+		markJobStopped(pid)
+		notifMu.Lock()
+		pendingNotifs = append(pendingNotifs, fmt.Sprintf("\n[%d]+  Stopped    %s\n", job.Number, job.Command))
+		notifMu.Unlock()
+	} else {
+		exitCode := 0
+		if status.Exited() {
+			exitCode = status.ExitStatus()
+		} else if status.Signaled() {
+			exitCode = 128 + int(status.Signal())
+		}
+		markJobDone(pid, exitCode)
+		notifMu.Lock()
+		pendingNotifs = append(pendingNotifs, fmt.Sprintf("[%d]+  Done       %s\n", job.Number, job.Command))
+		notifMu.Unlock()
+	}
+}
+
+func tcsetpgrp(fd int, pgid int) error {
+	var p int32 = int32(pgid)
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), syscall.TIOCSPGRP, uintptr(unsafe.Pointer(&p)))
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+func giveTerminal(pgid int) {
+	_ = tcsetpgrp(int(os.Stdin.Fd()), pgid)
+}
+
+func takeTerminal() {
+	_ = tcsetpgrp(int(os.Stdin.Fd()), syscall.Getpgrp())
+}
+
+func waitForeground(pids []int, pgid int, command string) int {
+	setFgPIDs(pids)
+	defer clearFgPIDs()
+
+	remaining := make(map[int]bool)
+	for _, p := range pids {
+		remaining[p] = true
+	}
+
+	for _, p := range pids {
+		syscall.Setpgid(p, pgid)
+	}
+	syscall.Setpgid(0, 0)
+	giveTerminal(pgid)
+	defer takeTerminal()
+
+	for _, p := range pids {
+		syscall.Kill(p, syscall.SIGCONT)
+	}
+
+	lastExit := 0
+	for len(remaining) > 0 {
+		var status syscall.WaitStatus
+		pid, err := syscall.Wait4(-1, &status, syscall.WUNTRACED, nil)
+		if err != nil {
+			if err == syscall.EINTR {
+				continue
+			}
+			break
+		}
+		if pid <= 0 {
+			break
+		}
+
+		if !remaining[pid] {
+			handleChildReap(pid, status)
+			continue
+		}
+
+		if status.Stopped() {
+			syscall.Kill(-pgid, syscall.SIGTSTP)
+			for otherPid := range remaining {
+				if otherPid == pid {
+					delete(remaining, otherPid)
+					continue
+				}
+				var s2 syscall.WaitStatus
+				for {
+					wp, we := syscall.Wait4(otherPid, &s2, syscall.WUNTRACED, nil)
+					if we != nil {
+						if we == syscall.EINTR {
+							continue
+						}
+						break
+					}
+					if wp == otherPid {
+						break
+					}
+					break
+				}
+				delete(remaining, otherPid)
+			}
+			job := addJob(pids[0], pgid, JobStopped, command)
+			fmt.Printf("\n[%d]+  Stopped    %s\n", job.Number, job.Command)
+			return -1
+		}
+
+		if status.Exited() {
+			lastExit = status.ExitStatus()
+		} else if status.Signaled() {
+			lastExit = 128 + int(status.Signal())
+		}
+		delete(remaining, pid)
+	}
+
+	return lastExit
+}
+
+func listSignals() []syscall.Signal {
+	return []syscall.Signal{
+		syscall.SIGHUP, syscall.SIGINT, syscall.SIGQUIT,
+		syscall.SIGILL, syscall.SIGTRAP, syscall.SIGABRT,
+		syscall.SIGBUS, syscall.SIGFPE, syscall.SIGKILL,
+		syscall.SIGUSR1, syscall.SIGSEGV, syscall.SIGUSR2,
+		syscall.SIGPIPE, syscall.SIGALRM, syscall.SIGTERM,
+		syscall.SIGSTKFLT, syscall.SIGCHLD, syscall.SIGCONT,
+		syscall.SIGSTOP, syscall.SIGTSTP, syscall.SIGTTIN,
+		syscall.SIGTTOU, syscall.SIGURG, syscall.SIGXCPU,
+		syscall.SIGXFSZ, syscall.SIGVTALRM, syscall.SIGPROF,
+		syscall.SIGWINCH, syscall.SIGIO, syscall.SIGPWR,
+		syscall.SIGSYS,
+	}
+}
+
+func parseSignal(s string) (syscall.Signal, error) {
+	n, err := strconv.Atoi(s)
+	if err == nil {
+		return syscall.Signal(n), err
+	}
+	name := strings.ToUpper(s)
+	if !strings.HasPrefix(name, "SIG") {
+		name = "SIG" + name
+	}
+	for _, sig := range listSignals() {
+		if sig.String() == name {
+			return sig, nil
+		}
+	}
+	return 0, fmt.Errorf("invalid signal: %s", s)
+}
