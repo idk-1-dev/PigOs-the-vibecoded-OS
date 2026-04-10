@@ -72,7 +72,7 @@ Password: toor
 ## FIRST COMMANDS
 ```
 help          - list all commands
-fastfetch     - system info display
+pigfetch      - system info display
 wm            - launch VDM login (requires login)
 wm            - launch PigWM desktop after login
 ls / ls -la   - list files
