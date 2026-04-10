@@ -123,6 +123,7 @@ CREDITS
   - VDM: from erofs project
   - lwIP: TCP/IP stack
   - stb: Sean Barrett's single-file libraries
+  - bash-completion: github.com/scop/bash-completion (GPL v2)
 
 VERSION
 -------
