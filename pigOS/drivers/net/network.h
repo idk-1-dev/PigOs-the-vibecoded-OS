@@ -155,7 +155,8 @@ static err_t lo_init(struct netif* netif){
     netif->output = lo_output_ipv4;
     netif->linkoutput = 0;
     netif->mtu = 65535;
-    netif->flags = NETIF_FLAG_LINK_UP;
+    // Ensure both UP and LINK_UP flags are set
+    netif->flags = NETIF_FLAG_UP | NETIF_FLAG_LINK_UP;
     netif->hwaddr_len = 0;
     return ERR_OK;
 }
@@ -426,26 +427,33 @@ static void net_debug_arp_gateway(void){
 
 // Unified network poll - dispatches to the detected driver
 static void net_poll(void){
-    if(detected_nic == NIC_NONE || !net_hw_ok){
-#if LWIP_NETIF_LOOPBACK && !LWIP_NETIF_LOOPBACK_MULTITHREADING
-        netif_poll_all();
-#endif
-        return;
+    // Always poll the hardware NIC if present
+    if(detected_nic != NIC_NONE && net_hw_ok){
+        switch(detected_nic){
+            case NIC_VIRTIO:
+                virtio_input(&pig_netif);
+                break;
+            case NIC_E1000:
+                e1000_poll(&pig_netif);
+                break;
+            case NIC_RTL:
+            default:
+                rtl_input(&pig_netif);
+                break;
+        }
     }
-    switch(detected_nic){
-        case NIC_VIRTIO:
-            virtio_input(&pig_netif);
-            break;
-        case NIC_E1000:
-            e1000_poll(&pig_netif);
-            break;
-        case NIC_RTL:
-        default:
-            rtl_input(&pig_netif);
-            break;
-    }
+    // Always process loopback input every tick (NO_SYS mode)
 #if LWIP_NETIF_LOOPBACK && !LWIP_NETIF_LOOPBACK_MULTITHREADING
     netif_poll_all();
+#else
+    // Manual loopback feed for NO_SYS mode
+    struct pbuf* q;
+    while ((q = lo_netif.loop_first) != NULL) {
+        lo_netif.loop_first = q->next;
+        q->next = NULL;
+        ip_input(q, &lo_netif);
+    }
+    lo_netif.loop_last = NULL;
 #endif
     net_debug_arp_gateway();
 }
