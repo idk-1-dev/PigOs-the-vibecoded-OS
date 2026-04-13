@@ -128,6 +128,8 @@ static err_t pig_input(struct pbuf *p, struct netif *inp){
 
 static err_t lo_output_ipv4(struct netif* netif, struct pbuf* p, const ip4_addr_t* ipaddr){
     (void)ipaddr;
+    static volatile uint32_t lo_tx_seen = 0;
+    lo_tx_seen++;
     return netif_loop_output(netif, p);
 }
 
@@ -601,6 +603,7 @@ static void do_ping_count(const char*host, int count){
     raw_bind(rpcb,IP_ADDR_ANY);
 
     int sent=0, got=0;
+    int lo_warned = 0;
     for(int seq=1; seq<=count; seq++){
         ping_seq=seq;
         uint8_t icmp_data[64];
@@ -630,6 +633,12 @@ static void do_ping_count(const char*host, int count){
         ping_got_reply=0;
         err_t e=raw_sendto(rpcb,p,&ip);
         pbuf_free(p);
+
+        if(dst_ip[0]==127 && !lo_warned){
+            // If loopback output isn't invoked, routing is still wrong.
+            vpln("ping: loopback output not observed (check lo netif)");
+            lo_warned = 1;
+        }
 
         if(e!=ERR_OK){
             vps("ping: send failed (err=");char ee[8];kia(e,ee);vps(ee);vps(") - ");vpln(host);

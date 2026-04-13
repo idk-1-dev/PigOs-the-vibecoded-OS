@@ -81,6 +81,7 @@ static int e1000_rx_idx=0;
 
 static inline uint32_t e1000_read32(uint32_t off){ return *(volatile uint32_t*)(e1000_mmio+off); }
 static inline void e1000_write32(uint32_t off, uint32_t v){ *(volatile uint32_t*)(e1000_mmio+off)=v; }
+static inline void e1000_mb(void){ __asm__ volatile("" ::: "memory"); }
 
 static inline struct e1000_tx_desc* e1000_tx_desc_ring(void){ return (struct e1000_tx_desc*)(uintptr_t)E1000_TX_DESC_PHYS; }
 static inline struct e1000_rx_desc* e1000_rx_desc_ring(void){ return (struct e1000_rx_desc*)(uintptr_t)E1000_RX_DESC_PHYS; }
@@ -110,6 +111,7 @@ static err_t e1000_output(struct netif*netif, struct pbuf*p){
     txd[idx].cmd = E1000_TX_CMD_EOP | E1000_TX_CMD_IFCS | E1000_TX_CMD_RS;
     txd[idx].status = 0;
 
+    e1000_mb();
     e1000_tx_idx = (e1000_tx_idx + 1) % E1000_MAX_DESC;
     e1000_write32(E1000_REG_TDT, (uint32_t)e1000_tx_idx);
 
@@ -140,6 +142,7 @@ static void e1000_poll(struct netif*netif){
         }
 
         rxd[idx].status = 0;
+        e1000_mb();
         e1000_write32(E1000_REG_RDT, (uint32_t)idx);
         e1000_rx_idx = (e1000_rx_idx + 1) % E1000_MAX_DESC;
     }
@@ -230,7 +233,11 @@ found:
     while(link_wait-- > 0){
         if(e1000_read32(E1000_REG_STATUS) & E1000_STATUS_LU) break;
     }
-    if(link_wait <= 0) return 0;
+    if(link_wait <= 0){
+        extern void vpln(const char*);
+        vpln("e1000: Hardware Link Down");
+        return 0;
+    }
 
     e1000_hw_ok = 1;
     e1000_tx_idx = 0;
