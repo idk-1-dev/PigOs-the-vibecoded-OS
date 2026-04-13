@@ -27,6 +27,7 @@
 #include <stddef.h>
 // DNS resolver prototype for shell and other users
 int resolve_hostname(const char* name, ip_addr_t* out_ip);
+void net_poll(void);
 
 #define NET_LOG_INFO(msg) LOG_NET(msg)
 #define NET_LOG_ERROR(msg) LOG_ERROR(msg)
@@ -315,7 +316,7 @@ static void dns_cb(const char* name, const ip_addr_t* ipaddr, void* arg) {
 }
 
 // Returns 0 on success, -1 on failure. Result in out_ip.
-static int resolve_hostname(const char* name, ip_addr_t* out_ip) {
+int resolve_hostname(const char* name, ip_addr_t* out_ip) {
     dns_done = 0;
     err_t err = dns_gethostbyname(name, &dns_result, dns_cb, NULL);
     if(err == ERR_OK) {
@@ -472,7 +473,7 @@ static void net_debug_arp_gateway(void){
 }
 
 // Unified network poll - dispatches to the detected driver
-static void net_poll(void){
+void net_poll(void){
     // Non-blocking: always process loopback, even if shell is waiting
     struct pbuf* q;
     while ((q = lo_netif.loop_first) != NULL) {
