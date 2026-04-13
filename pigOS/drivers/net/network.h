@@ -127,9 +127,10 @@ static err_t pig_input(struct pbuf *p, struct netif *inp){
     return ethernet_input(p, inp);
 }
 
+static volatile uint32_t lo_tx_seen = 0;
+
 static err_t lo_output_ipv4(struct netif* netif, struct pbuf* p, const ip4_addr_t* ipaddr){
     (void)ipaddr;
-    static volatile uint32_t lo_tx_seen = 0;
     lo_tx_seen++;
     return netif_loop_output(netif, p);
 }
@@ -411,6 +412,12 @@ static void net_debug_arp_gateway(void){
 
 // Unified network poll - dispatches to the detected driver
 static void net_poll(void){
+    if(detected_nic == NIC_NONE || !net_hw_ok){
+#if LWIP_NETIF_LOOPBACK && !LWIP_NETIF_LOOPBACK_MULTITHREADING
+        netif_poll_all();
+#endif
+        return;
+    }
     switch(detected_nic){
         case NIC_VIRTIO:
             virtio_input(&pig_netif);
@@ -658,13 +665,16 @@ static void do_ping_count(const char*host, int count){
         kmc(p->payload,icmp_data,64);
 
         ping_got_reply=0;
+        uint32_t lo_prev = lo_tx_seen;
         err_t e=raw_sendto(rpcb,p,&ip);
         pbuf_free(p);
 
         if(dst_ip[0]==127 && !lo_warned){
-            // If loopback output isn't invoked, routing is still wrong.
-            vpln("ping: loopback output not observed (check lo netif)");
-            lo_warned = 1;
+            if(lo_tx_seen == lo_prev){
+                // If loopback output isn't invoked, routing is still wrong.
+                vpln("ping: loopback output not observed (check lo netif)");
+                lo_warned = 1;
+            }
         }
 
         if(e!=ERR_OK){
