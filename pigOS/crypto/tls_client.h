@@ -75,8 +75,8 @@ static void tls_prf(uint8_t*out, int olen, const uint8_t*secret, int slen,
     uint8_t seed_buf[256];
     int seed_total=llen+seedlen;
     if(seed_total>256) seed_total=256;
-    for(int i=0;i<llen&&i<256;i++) seed_buf[i]=(uint8_t)label[i];
-    for(int i=0;i<seedlen&&i+llen<256;i++) seed_buf[llen+i]=seed[i];
+    for(size_t i=0;i<(size_t)llen&&i<256;i++) seed_buf[i]=(uint8_t)label[i];
+    for(size_t i=0;i<(size_t)seedlen&&i+llen<256;i++) seed_buf[llen+i]=seed[i];
     kmc(a,secret,slen<32?slen:32);
     hmac_sha256(a,slen,seed_buf,seed_total,a);
     int offset=0;
@@ -84,8 +84,8 @@ static void tls_prf(uint8_t*out, int olen, const uint8_t*secret, int slen,
         uint8_t p_buf[32+32+seed_total];
         int poff=0;
         kmc(p_buf,a,32); poff=32;
-        for(int i=0;i<llen&&poff<sizeof(p_buf);i++,poff++) p_buf[poff]=(uint8_t)label[i];
-        for(int i=0;i<seedlen&&poff<sizeof(p_buf);i++,poff++) p_buf[poff]=seed[i];
+        for(size_t i=0;i<(size_t)llen&&poff<sizeof(p_buf);i++,poff++) p_buf[poff]=(uint8_t)label[i];
+        for(size_t i=0;i<(size_t)seedlen&&poff<sizeof(p_buf);i++,poff++) p_buf[poff]=seed[i];
         uint8_t hash[32];
         hmac_sha256(secret,slen,p_buf,poff,hash);
         int cpy=olen-offset<32?olen-offset:32;
@@ -95,7 +95,7 @@ static void tls_prf(uint8_t*out, int olen, const uint8_t*secret, int slen,
         int as=32+seed_total;
         if(as>256) as=256;
         kmc(a_seed,a,32);
-        for(int i=0;i<seedlen&&i+32<256;i++) a_seed[32+i]=seed[i];
+        for(size_t i=0;i<(size_t)seedlen&&i+32<256;i++) a_seed[32+i]=seed[i];
         hmac_sha256(a,slen,a_seed,as,a);
     }
 }
