@@ -996,7 +996,25 @@ void sh_dispatch(const char*raw_line){
             tcp_wget(a);
         }
     }
-    else if(!ksc(cmd,"nslookup")||!ksc(cmd,"dig")) {vps("Server: 8.8.8.8\nName: ");vpln(a&&*a?a:"?");}
+    else if(!ksc(cmd,"nslookup")||!ksc(cmd,"dig")) {
+        if(!a||!*a){vpln("Usage: nslookup <hostname>");}
+        else {
+            ip_addr_t ip;
+            extern int resolve_hostname(const char*, ip_addr_t*);
+            int ok = resolve_hostname(a, &ip);
+            if(ok==0){
+                vps("Server: 8.8.8.8\nName: ");vps(a);vps("\nAddress: ");
+                char ipbuf[32];
+                uint32_t addr = ip4_addr_get_u32(&ip);
+                kitoa((addr>>24)&0xFF,ipbuf);vps(ipbuf);vps(".");
+                kitoa((addr>>16)&0xFF,ipbuf);vps(ipbuf);vps(".");
+                kitoa((addr>>8)&0xFF,ipbuf);vps(ipbuf);vps(".");
+                kitoa((addr)&0xFF,ipbuf);vpln(ipbuf);
+            } else {
+                vps("Server: 8.8.8.8\nName: ");vps(a);vpln("\n*** No address found");
+            }
+        }
+    }
     else if(!ksc(cmd,"traceroute")) {vps("traceroute to ");vpln(a&&*a?a:"?");}
     else if(!ksc(cmd,"ss"))  vpln("tcp LISTEN 0.0.0.0:22");
     else if(!ksc(cmd,"arp")||!ksc(cmd,"route")) vpln("[no routing table - no carrier]");

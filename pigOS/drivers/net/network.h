@@ -293,6 +293,44 @@ static void net_init(void){
     vps("lwip: netif flags=");char fl[16];kuia(pig_netif.flags,fl,16);vps(fl);vpln("");
     vps("lwip: netif mtu=");kia(pig_netif.mtu,fl);vpln(fl);
     vrst();
+
+    // DNS initialization
+    dns_init();
+    ip_addr_t dns_addr;
+    IP4_ADDR(&dns_addr, 8,8,8,8);
+    dns_setserver(0, &dns_addr);
+}
+
+// DNS resolver for NO_SYS mode
+#include "lwip/src/include/lwip/dns.h"
+static volatile int dns_done = 0;
+static ip_addr_t dns_result;
+static void dns_cb(const char* name, const ip_addr_t* ipaddr, void* arg) {
+    if(ipaddr) dns_result = *ipaddr;
+    else IP4_ADDR(&dns_result, 0,0,0,0);
+    dns_done = 1;
+}
+
+// Returns 0 on success, -1 on failure. Result in out_ip.
+static int resolve_hostname(const char* name, ip_addr_t* out_ip) {
+    dns_done = 0;
+    err_t err = dns_gethostbyname(name, &dns_result, dns_cb, NULL);
+    if(err == ERR_OK) {
+        *out_ip = dns_result;
+        return 0;
+    } else if(err == ERR_INPROGRESS) {
+        // Poll until callback fires (non-blocking, but busy-wait)
+        int timeout = 10000000; // ~few seconds max
+        while(!dns_done && timeout-- > 0) {
+            sys_check_timeouts();
+            net_poll();
+        }
+        if(dns_done && ip4_addr_get_u32(&dns_result) != 0) {
+            *out_ip = dns_result;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 // Bring eth0 up - works with RTL8139, e1000, or VirtIO
