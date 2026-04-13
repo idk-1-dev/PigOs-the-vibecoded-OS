@@ -38,7 +38,7 @@
 
 // Enable 127.0.0.1 support and use polling loopback mode for NO_SYS.
 #define LWIP_NETIF_LOOPBACK             1
-#define LWIP_HAVE_LOOPIF                1
+#define LWIP_HAVE_LOOPIF                0
 #define LWIP_NETIF_LOOPBACK_MULTITHREADING 0
 
 #define LWIP_NETIF_STATUS_CALLBACK      0

@@ -21,6 +21,8 @@
 #define E1000_REG_STATUS 0x0008
 #define E1000_REG_IMC    0x00D8
 
+#define E1000_STATUS_LU  (1u<<1)
+
 #define E1000_REG_RCTL   0x0100
 #define E1000_REG_TCTL   0x0400
 #define E1000_REG_TIPG   0x0410
@@ -222,6 +224,13 @@ found:
     // Validate that TX/RX are really enabled after BAR0/MMIO setup.
     if((e1000_read32(E1000_REG_TCTL) & E1000_TCTL_EN) == 0) return 0;
     if((e1000_read32(E1000_REG_RCTL) & E1000_RCTL_EN) == 0) return 0;
+
+    // Wait for Link Up before returning success.
+    int link_wait = 2000000;
+    while(link_wait-- > 0){
+        if(e1000_read32(E1000_REG_STATUS) & E1000_STATUS_LU) break;
+    }
+    if(link_wait <= 0) return 0;
 
     e1000_hw_ok = 1;
     e1000_tx_idx = 0;

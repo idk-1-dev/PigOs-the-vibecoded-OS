@@ -19,6 +19,7 @@
 #include "lwip/src/include/lwip/timeouts.h"
 #include "lwip/src/include/lwip/etharp.h"
 #include "lwip/src/include/lwip/ip4.h"
+#include "lwip/src/include/lwip/ip.h"
 #include "lwip/src/include/lwip/raw.h"
 #include <stdint.h>
 
@@ -125,8 +126,25 @@ static err_t pig_input(struct pbuf *p, struct netif *inp){
     return ethernet_input(p, inp);
 }
 
+static err_t lo_output_ipv4(struct netif* netif, struct pbuf* p, const ip4_addr_t* ipaddr){
+    (void)ipaddr;
+    return netif_loop_output(netif, p);
+}
+
+static err_t lo_init(struct netif* netif){
+    netif->name[0] = 'l';
+    netif->name[1] = 'o';
+    netif->output = lo_output_ipv4;
+    netif->linkoutput = 0;
+    netif->mtu = 65535;
+    netif->flags = NETIF_FLAG_LINK_UP;
+    netif->hwaddr_len = 0;
+    return ERR_OK;
+}
+
 // Global state
 static struct netif pig_netif;
+static struct netif lo_netif;
 static int net_ok=0;
 static uint32_t net_my_ip=0, net_gw_ip=0, net_mask=0;
 static uint8_t*net_mac_ptr=rtl_mac;
@@ -200,6 +218,18 @@ static void net_init(void){
     }
     netif_detect_name();
     lwip_init();
+
+    // Explicitly add loopback interface so 127.0.0.1 is always local.
+    ip4_addr_t lo_ip, lo_nm, lo_gw;
+    IP4_ADDR(&lo_ip, 127, 0, 0, 1);
+    IP4_ADDR(&lo_nm, 255, 0, 0, 0);
+    IP4_ADDR(&lo_gw, 127, 0, 0, 1);
+    struct netif* lo_added = netif_add(&lo_netif, &lo_ip, &lo_nm, &lo_gw, NULL, lo_init, ip_input);
+    if(lo_added){
+        netif_set_link_up(&lo_netif);
+        netif_set_up(&lo_netif);
+    }
+
     struct netif* added = 0;
     switch(detected_nic){
         case NIC_VIRTIO:
@@ -224,6 +254,7 @@ static void net_init(void){
 #if LWIP_NETIF_STATUS_CALLBACK
     netif_set_status_callback(&pig_netif, net_status_callback);
 #endif
+    // Keep the external NIC as default route; loopback handles local 127/8 traffic.
     netif_set_default(&pig_netif);
     netif_set_up(&pig_netif);
     netif_set_link_up(&pig_netif);
@@ -552,9 +583,10 @@ static void do_ping_count(const char*host, int count){
         return;
     }
 
-    vps("ping: sending to gateway 10.0.2.2 (ARP handled by lwIP)\n");
-
     uint8_t*dst_ip=(uint8_t*)&ip.addr;
+    if(dst_ip[0]==127) vpln("ping: using loopback interface lo");
+    else vpln("ping: using external route via eth0");
+
     vps("PING ");vps(host);vps(" (");
     char ob[8];
     kia(dst_ip[0],ob);vps(ob);vpc('.');
