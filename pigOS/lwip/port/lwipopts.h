@@ -28,7 +28,7 @@
 #define MEMP_NUM_TCP_PCB                8
 #define MEMP_NUM_TCP_PCB_LISTEN         4
 #define MEMP_NUM_TCP_SEG                32
-#define PBUF_POOL_SIZE                  16
+#define PBUF_POOL_SIZE                  32
 #define PBUF_POOL_BUFSIZE               1536
 
 #define LWIP_DHCP                       1

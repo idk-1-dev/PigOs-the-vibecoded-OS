@@ -502,7 +502,10 @@ static void net_debug_arp_gateway(void){
 
 // Unified network poll - dispatches to the detected driver
 void net_poll(void){
-    // Explicit loopback pump for NO_SYS mode: process lo queue every tick.
+    // Explicit loopback pump for NO_SYS mode: always kick lo each tick.
+    netif_poll(&lo_netif);
+
+    // Drain any remaining queued loopback packets this tick.
     while(lo_netif.loop_first != NULL){
         netif_poll(&lo_netif);
     }
