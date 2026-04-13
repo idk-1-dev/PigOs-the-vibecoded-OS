@@ -132,7 +132,21 @@ static volatile uint32_t lo_tx_seen = 0;
 static err_t lo_output_ipv4(struct netif* netif, struct pbuf* p, const ip4_addr_t* ipaddr){
     (void)ipaddr;
     lo_tx_seen++;
-    return netif_loop_output(netif, p);
+    err_t ret = netif_loop_output(netif, p);
+#if !NO_SYS
+    return ret;
+#else
+    // In NO_SYS mode, manually deliver loopback packets to input queue
+    // netif_loop_output queues the packet, but we must call ip_input to process it
+    struct pbuf* q;
+    while ((q = netif->loop_first) != NULL) {
+        netif->loop_first = q->next;
+        q->next = NULL;
+        ip_input(q, netif);
+    }
+    netif->loop_last = NULL;
+    return ret;
+#endif
 }
 
 static err_t lo_init(struct netif* netif){
@@ -640,7 +654,8 @@ static void do_ping_count(const char*host, int count){
     int lo_warned = 0;
     for(int seq=1; seq<=count; seq++){
         ping_seq=seq;
-        uint8_t icmp_data[64];
+        // Ensure ICMP buffer is 4-byte aligned for e1000 compatibility
+        uint8_t icmp_data[64] __attribute__((aligned(4)));
         kms(icmp_data,0,sizeof(icmp_data));
         icmp_data[0]=8;
         icmp_data[1]=0;
