@@ -157,7 +157,10 @@ static err_t lo_init(struct netif* netif){
     netif->mtu = 65535;
     // Ensure both UP and LINK_UP flags are set
     netif->flags = NETIF_FLAG_UP | NETIF_FLAG_LINK_UP;
-    netif->hwaddr_len = 0;
+    // Set a dummy MAC address (non-null, not all zeroes)
+    netif->hwaddr_len = 6;
+    netif->hwaddr[0] = 0x02; netif->hwaddr[1] = 0x00; netif->hwaddr[2] = 0x00;
+    netif->hwaddr[3] = 0x00; netif->hwaddr[4] = 0x00; netif->hwaddr[5] = 0x01;
     return ERR_OK;
 }
 
@@ -247,6 +250,8 @@ static void net_init(void){
     if(lo_added){
         netif_set_up(&lo_netif);
         netif_set_link_up(&lo_netif);
+        // Set loopback as default for 127.x.x.x
+        netif_set_default(&lo_netif);
     }
 
     struct netif* added = 0;
@@ -427,6 +432,19 @@ static void net_debug_arp_gateway(void){
 
 // Unified network poll - dispatches to the detected driver
 static void net_poll(void){
+    // Non-blocking: always process loopback, even if shell is waiting
+    struct pbuf* q;
+    while ((q = lo_netif.loop_first) != NULL) {
+        lo_netif.loop_first = q->next;
+        q->next = NULL;
+        if (lo_netif.input) {
+            lo_netif.input(q, &lo_netif);
+        } else {
+            pbuf_free(q);
+        }
+    }
+    lo_netif.loop_last = NULL;
+
     // Always poll the hardware NIC if present
     if(detected_nic != NIC_NONE && net_hw_ok){
         switch(detected_nic){
@@ -442,19 +460,6 @@ static void net_poll(void){
                 break;
         }
     }
-
-    // Explicitly process loopback packets every tick
-    struct pbuf* q;
-    while ((q = lo_netif.loop_first) != NULL) {
-        lo_netif.loop_first = q->next;
-        q->next = NULL;
-        if (lo_netif.input) {
-            lo_netif.input(q, &lo_netif);
-        } else {
-            pbuf_free(q);
-        }
-    }
-    lo_netif.loop_last = NULL;
 
     net_debug_arp_gateway();
 }
