@@ -17,7 +17,10 @@ section .bss
 align 4096
 pml4_table:   resb 4096
 pdpt_table:   resb 4096
-pd_table:     resb 4096
+pd_table0:    resb 4096
+pd_table1:    resb 4096
+pd_table2:    resb 4096
+pd_table3:    resb 4096
 stack_bottom: resb 65536   ; 64KB stack
 stack_top:
 
@@ -56,19 +59,55 @@ _start:
     mov [pml4_table], eax
 
     ; PDPT[0] -> PD
-    mov eax, pd_table
+    mov eax, pd_table0
     or  eax, 0x03
     mov [pdpt_table], eax
 
-    ; PD: identity map 1GB with 2MB pages
+    mov eax, pd_table1
+    or  eax, 0x03
+    mov [pdpt_table + 8], eax
+
+    mov eax, pd_table2
+    or  eax, 0x03
+    mov [pdpt_table + 16], eax
+
+    mov eax, pd_table3
+    or  eax, 0x03
+    mov [pdpt_table + 24], eax
+
+    ; PDs: identity map 4GB with 2MB pages
     mov ecx, 0
     mov eax, 0x83
-.pd_loop:
-    mov [pd_table + ecx*8], eax
+.pd_loop0:
+    mov [pd_table0 + ecx*8], eax
     add eax, 0x200000
     inc ecx
     cmp ecx, 512
-    jne .pd_loop
+    jne .pd_loop0
+
+    mov ecx, 0
+.pd_loop1:
+    mov [pd_table1 + ecx*8], eax
+    add eax, 0x200000
+    inc ecx
+    cmp ecx, 512
+    jne .pd_loop1
+
+    mov ecx, 0
+.pd_loop2:
+    mov [pd_table2 + ecx*8], eax
+    add eax, 0x200000
+    inc ecx
+    cmp ecx, 512
+    jne .pd_loop2
+
+    mov ecx, 0
+.pd_loop3:
+    mov [pd_table3 + ecx*8], eax
+    add eax, 0x200000
+    inc ecx
+    cmp ecx, 512
+    jne .pd_loop3
 
     ; Enable PAE
     mov eax, cr4
