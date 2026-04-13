@@ -219,6 +219,10 @@ found:
 
     e1000_write32(E1000_REG_CTRL, e1000_read32(E1000_REG_CTRL) | (1u<<6));
 
+    // Validate that TX/RX are really enabled after BAR0/MMIO setup.
+    if((e1000_read32(E1000_REG_TCTL) & E1000_TCTL_EN) == 0) return 0;
+    if((e1000_read32(E1000_REG_RCTL) & E1000_RCTL_EN) == 0) return 0;
+
     e1000_hw_ok = 1;
     e1000_tx_idx = 0;
     e1000_rx_idx = 0;

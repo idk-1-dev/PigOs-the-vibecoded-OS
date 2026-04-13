@@ -364,6 +364,9 @@ static void net_poll(void){
             rtl_input(&pig_netif);
             break;
     }
+#if LWIP_NETIF_LOOPBACK && !LWIP_NETIF_LOOPBACK_MULTITHREADING
+    netif_poll_all();
+#endif
 }
 
 // TCP connect (synchronous, raw lwIP)
