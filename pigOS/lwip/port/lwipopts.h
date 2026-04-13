@@ -48,12 +48,13 @@
 #define LWIP_PROVIDE_ERRNO              0
 #define CHECKSUM_CHECK_UDP              0
 #define CHECKSUM_CHECK_IP               0
-#define CHECKSUM_GEN_UDP                0
-#define CHECKSUM_GEN_IP                 0
-
-#define LWIP_DEBUG                      0
-
-#define IP_ACCEPT_LINK_LAYER_ADDRESSING  1
-#define LWIP_IP_ACCEPT_UDP_PORT(dst_port) ((dst_port) == PP_NTOHS(68))
-
-#define LWIP_RAND()                     ({ static uint32_t _s=0xDEAD1337; _s^=_s<<13; _s^=_s>>17; _s^=_s<<5; _s; })
+#define CHECKSUM_GEN_IP                 1
+#define CHECKSUM_GEN_UDP                1
+#define CHECKSUM_GEN_TCP                1
+#define CHECKSUM_GEN_ICMP               1
+#define CHECKSUM_GEN_ICMP6              1
+#define CHECKSUM_CHECK_IP               1
+#define CHECKSUM_CHECK_UDP              1
+#define CHECKSUM_CHECK_TCP              1
+#define CHECKSUM_CHECK_ICMP             1
+#define CHECKSUM_CHECK_ICMP6            1
