@@ -38,6 +38,78 @@ extern void sh_dispatch(const char*);
 #include "../shell/shell.h"
 #include "../wm/wm.h"
 
+struct idt_entry {
+    uint16_t offset_low;
+    uint16_t selector;
+    uint8_t ist;
+    uint8_t type_attr;
+    uint16_t offset_mid;
+    uint32_t offset_high;
+    uint32_t zero;
+} __attribute__((packed));
+
+struct idt_ptr {
+    uint16_t limit;
+    uint64_t base;
+} __attribute__((packed));
+
+struct interrupt_frame {
+    uint64_t rip;
+    uint64_t cs;
+    uint64_t rflags;
+    uint64_t rsp;
+    uint64_t ss;
+} __attribute__((packed));
+
+static struct idt_entry kernel_idt[256] __attribute__((aligned(16)));
+static struct idt_ptr kernel_idtr __attribute__((packed));
+
+static void idt_set_gate(int vec, void (*handler)(void), uint8_t type_attr){
+    uint64_t addr = (uint64_t)(uintptr_t)handler;
+    kernel_idt[vec].offset_low = (uint16_t)(addr & 0xFFFFu);
+    kernel_idt[vec].selector = 0x08;
+    kernel_idt[vec].ist = 0;
+    kernel_idt[vec].type_attr = type_attr;
+    kernel_idt[vec].offset_mid = (uint16_t)((addr >> 16) & 0xFFFFu);
+    kernel_idt[vec].offset_high = (uint32_t)((addr >> 32) & 0xFFFFFFFFu);
+    kernel_idt[vec].zero = 0;
+}
+
+static void kernel_exception_noerr(struct interrupt_frame* frame) __attribute__((interrupt));
+static void kernel_exception_err(struct interrupt_frame* frame, uint64_t error_code) __attribute__((interrupt));
+
+static void kernel_exception_noerr(struct interrupt_frame* frame){
+    (void)frame;
+    __asm__ volatile("cli; hlt");
+    for(;;){}
+}
+
+static void kernel_exception_err(struct interrupt_frame* frame, uint64_t error_code){
+    (void)frame;
+    (void)error_code;
+    __asm__ volatile("cli; hlt");
+    for(;;){}
+}
+
+static void idt_init(void){
+    for(int i = 0; i < 256; i++){
+        idt_set_gate(i, (void(*)(void))kernel_exception_noerr, 0x8E);
+    }
+    idt_set_gate(8,  (void(*)(void))kernel_exception_err, 0x8E);
+    idt_set_gate(10, (void(*)(void))kernel_exception_err, 0x8E);
+    idt_set_gate(11, (void(*)(void))kernel_exception_err, 0x8E);
+    idt_set_gate(12, (void(*)(void))kernel_exception_err, 0x8E);
+    idt_set_gate(13, (void(*)(void))kernel_exception_err, 0x8E);
+    idt_set_gate(14, (void(*)(void))kernel_exception_err, 0x8E);
+    idt_set_gate(17, (void(*)(void))kernel_exception_err, 0x8E);
+    idt_set_gate(30, (void(*)(void))kernel_exception_err, 0x8E);
+
+    kernel_idtr.limit = (uint16_t)(sizeof(kernel_idt) - 1);
+    kernel_idtr.base = (uint64_t)(uintptr_t)kernel_idt;
+    __asm__ volatile("lidt %0" : : "m"(kernel_idtr));
+    __asm__ volatile("sti");
+}
+
 #define MBOOT_MAGIC 0x2BADB002
 
 // Runtime module config - reads /etc/pigos.conf at boot
@@ -100,6 +172,8 @@ static void boot_line(uint8_t col,const char*tag,const char*msg){
 
 void kernel_main(uint32_t magic,uint32_t mb_info){
     (void)mb_info;
+
+    idt_init();
 
 #ifdef CONFIG_VGA_DRIVER
     vga_init();
