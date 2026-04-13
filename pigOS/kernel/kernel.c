@@ -496,5 +496,15 @@ void kernel_main(uint32_t magic,uint32_t mb_info){
     }
 #endif
 
-    __asm__("cli;hlt");
+    // Fallback kernel main loop: keep network/timers alive even if shell exits.
+    for(;;){
+#ifdef CONFIG_LWIP
+        sys_check_timeouts();
+        net_poll();
+#endif
+#ifdef CONFIG_PS2_KEYBOARD
+        ps2_poll();
+#endif
+        for(volatile int i=0;i<50000;i++){}
+    }
 }

@@ -137,21 +137,7 @@ static volatile uint32_t lo_tx_seen = 0;
 static err_t lo_output_ipv4(struct netif* netif, struct pbuf* p, const ip4_addr_t* ipaddr){
     (void)ipaddr;
     lo_tx_seen++;
-    err_t ret = netif_loop_output(netif, p);
-#if !NO_SYS
-    return ret;
-#else
-    // In NO_SYS mode, manually deliver loopback packets to input queue
-    // netif_loop_output queues the packet, but we must call ip_input to process it
-    struct pbuf* q;
-    while ((q = netif->loop_first) != NULL) {
-        netif->loop_first = q->next;
-        q->next = NULL;
-        ip_input(q, netif);
-    }
-    netif->loop_last = NULL;
-    return ret;
-#endif
+    return netif_loop_output(netif, p);
 }
 
 static err_t lo_init(struct netif* netif){
@@ -302,7 +288,7 @@ static void net_init(void){
     // DNS initialization
     dns_init();
     ip_addr_t dns_addr;
-    IP4_ADDR(&dns_addr, 8,8,8,8);
+    IP_ADDR4(&dns_addr, 8, 8, 8, 8);
     dns_setserver(0, &dns_addr);
 }
 
@@ -310,8 +296,24 @@ static void net_init(void){
 static volatile int dns_done = 0;
 static ip_addr_t dns_result;
 static void dns_cb(const char* name, const ip_addr_t* ipaddr, void* arg) {
-    if(ipaddr) dns_result = *ipaddr;
-    else IP4_ADDR(&dns_result, 0,0,0,0);
+    (void)arg;
+    if(ipaddr){
+        dns_result = *ipaddr;
+        uint32_t addr = ip4_addr_get_u32(ip_2_ip4(ipaddr));
+        char b[8];
+        vps("dns: callback ");
+        vps(name ? name : "?");
+        vps(" -> ");
+        kia((addr >> 24) & 0xFF, b); vps(b); vpc('.');
+        kia((addr >> 16) & 0xFF, b); vps(b); vpc('.');
+        kia((addr >> 8) & 0xFF, b); vps(b); vpc('.');
+        kia(addr & 0xFF, b); vps(b); vpln("");
+    } else {
+        IP_ADDR4(&dns_result, 0, 0, 0, 0);
+        vps("dns: callback ");
+        vps(name ? name : "?");
+        vpln(" -> no address");
+    }
     dns_done = 1;
 }
 
@@ -474,18 +476,10 @@ static void net_debug_arp_gateway(void){
 
 // Unified network poll - dispatches to the detected driver
 void net_poll(void){
-    // Non-blocking: always process loopback, even if shell is waiting
-    struct pbuf* q;
-    while ((q = lo_netif.loop_first) != NULL) {
-        lo_netif.loop_first = q->next;
-        q->next = NULL;
-        if (lo_netif.input) {
-            lo_netif.input(q, &lo_netif);
-        } else {
-            pbuf_free(q);
-        }
+    // Explicit loopback pump for NO_SYS mode: process lo queue every tick.
+    if(lo_netif.loop_first != NULL){
+        netif_poll(&lo_netif);
     }
-    lo_netif.loop_last = NULL;
 
     // Always poll the hardware NIC if present
     if(detected_nic != NIC_NONE && net_hw_ok){
@@ -502,6 +496,11 @@ void net_poll(void){
                 break;
         }
     }
+
+#if LWIP_NETIF_LOOPBACK && !LWIP_NETIF_LOOPBACK_MULTITHREADING
+    // Also poll all netifs once per tick so loopback traffic is never starved.
+    netif_poll_all();
+#endif
 
     net_debug_arp_gateway();
 }
