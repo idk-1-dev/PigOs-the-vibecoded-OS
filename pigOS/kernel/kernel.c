@@ -107,7 +107,6 @@ static void idt_init(void){
     kernel_idtr.limit = (uint16_t)(sizeof(kernel_idt) - 1);
     kernel_idtr.base = (uint64_t)(uintptr_t)kernel_idt;
     __asm__ volatile("lidt %0" : : "m"(kernel_idtr));
-    __asm__ volatile("sti");
 }
 
 #define MBOOT_MAGIC 0x2BADB002
