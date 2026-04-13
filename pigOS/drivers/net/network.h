@@ -228,8 +228,8 @@ static void net_init(void){
     IP4_ADDR(&lo_gw, 127, 0, 0, 1);
     struct netif* lo_added = netif_add(&lo_netif, &lo_ip, &lo_nm, &lo_gw, NULL, lo_init, ip_input);
     if(lo_added){
-        netif_set_link_up(&lo_netif);
         netif_set_up(&lo_netif);
+        netif_set_link_up(&lo_netif);
     }
 
     struct netif* added = 0;
@@ -256,8 +256,10 @@ static void net_init(void){
 #if LWIP_NETIF_STATUS_CALLBACK
     netif_set_status_callback(&pig_netif, net_status_callback);
 #endif
-    // Keep the external NIC as default route; loopback handles local 127/8 traffic.
-    netif_set_default(&pig_netif);
+    // Keep the external NIC as default route; never set loopback as default.
+    if(detected_nic == NIC_E1000){
+        netif_set_default(&pig_netif);
+    }
     netif_set_up(&pig_netif);
     netif_set_link_up(&pig_netif);
 #if !LWIP_NETIF_STATUS_CALLBACK
@@ -383,6 +385,29 @@ static int do_dhcp(void){
     return eth0_up();
 }
 
+static void net_debug_arp_gateway(void){
+    static int arp_logged = 0;
+    if(arp_logged || !net_ok){
+        return;
+    }
+    ip4_addr_t gw;
+    IP4_ADDR(&gw, 10, 0, 2, 2);
+    struct eth_addr *eth_ret = NULL;
+    const ip4_addr_t *ip_ret = NULL;
+    ssize_t idx = etharp_find_addr(&pig_netif, &gw, &eth_ret, &ip_ret);
+    if(idx >= 0 && eth_ret){
+        vps("arp: entry for 10.0.2.2 -> ");
+        for(int i = 0; i < 6; i++){
+            char hb[8];
+            kia(eth_ret->addr[i], hb);
+            vps(hb);
+            if(i < 5) vpc(':');
+        }
+        vpln("");
+        arp_logged = 1;
+    }
+}
+
 // Unified network poll - dispatches to the detected driver
 static void net_poll(void){
     switch(detected_nic){
@@ -400,6 +425,7 @@ static void net_poll(void){
 #if LWIP_NETIF_LOOPBACK && !LWIP_NETIF_LOOPBACK_MULTITHREADING
     netif_poll_all();
 #endif
+    net_debug_arp_gateway();
 }
 
 // TCP connect (synchronous, raw lwIP)
