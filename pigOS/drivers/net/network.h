@@ -1,5 +1,9 @@
 #pragma once
 // pigOS Network Layer - lwIP integration with debug logging
+
+#include "lwip/dns.h"
+#include "lwip/udp.h"
+#include "lwip/ip_addr.h"
 #include "kernel/mem.h"
 #include "kernel/logger.h"
 #include "drivers/vga/vga.h"
@@ -9,10 +13,8 @@
 #include "lwip/src/include/lwip/netif.h"
 #include "lwip/src/include/lwip/ip4_addr.h"
 #include "lwip/src/include/lwip/dhcp.h"
-#include "lwip/src/include/lwip/dns.h"
 #include "lwip/src/include/lwip/tcp.h"
 #include "lwip/src/include/lwip/priv/tcp_priv.h"
-#include "lwip/src/include/lwip/udp.h"
 #include "lwip/src/include/lwip/pbuf.h"
 #include "lwip/src/include/lwip/err.h"
 #include "lwip/src/include/lwip/tcpip.h"
@@ -23,6 +25,8 @@
 #include "lwip/src/include/lwip/raw.h"
 #include <stdint.h>
 #include <stddef.h>
+// DNS resolver prototype for shell and other users
+int resolve_hostname(const char* name, ip_addr_t* out_ip);
 
 #define NET_LOG_INFO(msg) LOG_NET(msg)
 #define NET_LOG_ERROR(msg) LOG_ERROR(msg)
@@ -302,7 +306,6 @@ static void net_init(void){
 }
 
 // DNS resolver for NO_SYS mode
-#include "lwip/src/include/lwip/dns.h"
 static volatile int dns_done = 0;
 static ip_addr_t dns_result;
 static void dns_cb(const char* name, const ip_addr_t* ipaddr, void* arg) {
