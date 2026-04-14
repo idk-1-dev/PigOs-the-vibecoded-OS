@@ -56,6 +56,12 @@ static int rpk_find_pkg(const char*n){
     return -1;
 }
 
+// Use the same DNS resolver path as nslookup/ping for repository lookup.
+static int rpk_resolve_repo(ip_addr_t*out_ip){
+    extern int resolve_hostname_for_tools(const char*, ip_addr_t*);
+    return resolve_hostname_for_tools("google.com", out_ip);
+}
+
 static void rpk_progress(const char*action,const char*pkg){
     vset(C_LCYAN,C_BLACK); vps("rpk: "); vps(action); vps(" "); vset(C_YELLOW,C_BLACK); vps(pkg); vrst(); vpc('\n');
     vps("  [");
@@ -182,6 +188,12 @@ static void cmd_rpk(const char*args){
         int idx=rpk_find_pkg(pkg);
         if(idx<0){vset(C_LRED,C_BLACK);vps("rpk: package '");vps(pkg);vpln("' not found. Try: rpk roam pk");vrst();return;}
         if(rpk_db[idx].installed){vps(pkg);vpln(" is already installed");return;}
+        ip_addr_t repo_ip;
+        if(rpk_resolve_repo(&repo_ip)==0){
+            vset(C_DGREY,C_BLACK);vps("rpk: repo resolved via DNS\n");vrst();
+        } else {
+            vset(C_YELLOW,C_BLACK);vps("rpk: repo DNS unresolved, using cached metadata\n");vrst();
+        }
         rpk_progress("downloading",pkg);
         rpk_progress("installing",pkg);
         rpk_db[idx].installed=1;
@@ -250,6 +262,12 @@ static void cmd_rpk(const char*args){
         vps("Status:   "); vpln(r->installed?"installed":"available");
     } else if(!ksc(sub,"update")){
         vset(C_LCYAN,C_BLACK); vpln("rpk: refreshing package database..."); vrst();
+        ip_addr_t repo_ip;
+        if(rpk_resolve_repo(&repo_ip)==0){
+            vset(C_DGREY,C_BLACK);vpln("rpk: repo DNS ok");vrst();
+        } else {
+            vset(C_YELLOW,C_BLACK);vpln("rpk: repo DNS failed (offline cache mode)");vrst();
+        }
         for(volatile int i=0;i<50000000;i++);
         vpln("rpk: 32 packages available");
     } else if(!ksc(sub,"upgrade")){

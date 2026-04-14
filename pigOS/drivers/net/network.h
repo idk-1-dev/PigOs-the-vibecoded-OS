@@ -602,8 +602,20 @@ static struct pbuf*tcp_recv_pbuf=NULL;
 static int tcp_recv_done=0;
 
 static err_t tcp_recv_cb(void*arg,struct tcp_pcb*tpcb,struct pbuf*p,err_t err){
-    if(p){tcp_recv_pbuf=p;tcp_recv_done=1;}
-    else{tcp_recv_done=1;}
+    (void)arg;
+    (void)err;
+    if(p){
+        // Tell lwIP we consumed these bytes so ACK/window updates are sent.
+        tcp_recved(tpcb, p->tot_len);
+        if(tcp_recv_pbuf){
+            pbuf_chain(tcp_recv_pbuf, p);
+        } else {
+            tcp_recv_pbuf=p;
+        }
+        tcp_recv_done=1;
+    } else {
+        tcp_recv_done=1;
+    }
     return ERR_OK;
 }
 
