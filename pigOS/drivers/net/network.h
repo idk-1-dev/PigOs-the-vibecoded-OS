@@ -135,10 +135,21 @@ static err_t pig_input(struct pbuf *p, struct netif *inp){
 static volatile uint32_t lo_tx_seen = 0;
 
 static err_t lo_output_ipv4(struct netif* netif, struct pbuf* p, const ip4_addr_t* ipaddr){
-    (void)ipaddr;
     lo_tx_seen++;
-    if(ipaddr && ip4_addr_get_u32(ipaddr) == 0x0100007F){
-        return ip_input(p, netif);
+    if(ipaddr){
+        uint32_t dip = ip4_addr_get_u32(ipaddr);
+        if(dip == 0x7F000001 || dip == 0x0100007F){
+            // Loopback short-circuit: feed packet back into local IP input.
+            struct pbuf* in = pbuf_alloc(PBUF_IP, p->tot_len, PBUF_RAM);
+            if(!in) return ERR_MEM;
+            if(pbuf_copy(in, p) != ERR_OK){
+                pbuf_free(in);
+                return ERR_MEM;
+            }
+            err_t ret = ip_input(in, netif);
+            if(ret != ERR_OK) pbuf_free(in);
+            return ret;
+        }
     }
     return netif_loop_output(netif, p);
 }
@@ -686,10 +697,28 @@ static uint16_t ping_id=0x1234;
 static uint16_t ping_seq=0;
 
 static u8_t ping_recv_cb(void*arg,struct raw_pcb*pcb,struct pbuf*p,const ip_addr_t*addr){
-    if(p->len>=28){
-        uint8_t*data=(uint8_t*)p->payload;
-        if(data[20]==0){
-            ping_got_reply=1;
+    (void)arg;
+    (void)pcb;
+    (void)addr;
+    if(p && p->tot_len >= 8){
+        uint8_t data[28];
+        int n = (p->tot_len < (uint16_t)sizeof(data)) ? (int)p->tot_len : (int)sizeof(data);
+        pbuf_copy_partial(p, data, n, 0);
+
+        int is_reply = 0;
+        // Raw ICMP payload form: type at offset 0, seq at 6..7
+        if(n >= 8 && data[0] == 0){
+            uint16_t seq = (uint16_t)(((uint16_t)data[6] << 8) | data[7]);
+            if(seq == ping_seq) is_reply = 1;
+        }
+        // IPv4+ICMP form fallback: type at offset 20, seq at 26..27
+        if(!is_reply && n >= 28 && data[20] == 0){
+            uint16_t seq = (uint16_t)(((uint16_t)data[26] << 8) | data[27]);
+            if(seq == ping_seq) is_reply = 1;
+        }
+
+        if(is_reply){
+            ping_got_reply = 1;
         }
     }
     return 1;
