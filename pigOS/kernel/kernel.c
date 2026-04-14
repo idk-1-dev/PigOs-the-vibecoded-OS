@@ -68,7 +68,7 @@ struct interrupt_frame {
 } __attribute__((packed));
 
 static struct idt_entry kernel_idt[256] __attribute__((aligned(16)));
-static struct idt_ptr kernel_idtr;
+static struct idt_ptr __attribute__((packed)) kernel_idtr;
 
 static void idt_set_gate(int vec, void (*handler)(void), uint8_t type_attr){
     uint64_t addr = (uint64_t)(uintptr_t)handler;
