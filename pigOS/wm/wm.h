@@ -53,7 +53,7 @@ static DockIcon dock[]={
     {21, "Browser",  0x03, COL(C_LCYAN,C_LCYAN), NULL},
     {30, "Settings", 0x04, COL(C_LMAG,C_LMAG), NULL},
     {39, "Browser2", 0x05, COL(C_YELLOW,C_YELLOW), NULL},
-    {48, "Power",    0x06, COL(C_LRED,C_LRED), dock_power},
+    {48, "Power",    0x06, COL(C_LRED,C_LRED), NULL},
 };
 static int dock_selected=-1;
 
