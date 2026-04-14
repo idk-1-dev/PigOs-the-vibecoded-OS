@@ -647,7 +647,7 @@ static int tcp_recv_sync(struct tcp_pcb*pcb,uint8_t*out,int max){
 // HTTP request helper
 static void http_request_sync(const char*host,const char*path,char*out,int maxout){
     ip_addr_t ip;
-    if(dns_gethostbyname(host,&ip,NULL,NULL)!=ERR_OK){
+    if(resolve_hostname_for_tools(host, &ip) != 0){
         vpln("http: DNS failed");return;
     }
     vps("http: connecting to ");vps(host);vpln("...");
