@@ -742,8 +742,12 @@ static void do_ping_count(const char*host, int count){
     if(is_ip){
         ip.addr=ip_raw;
     } else {
-        vpln("ping: DNS not supported (try IP address like 10.0.2.2)");
-        return;
+        if(resolve_hostname(host, &ip) != 0){
+            vps("ping: cannot resolve host '");
+            vps(host);
+            vpln("'");
+            return;
+        }
     }
 
     uint8_t*dst_ip=(uint8_t*)&ip.addr;
