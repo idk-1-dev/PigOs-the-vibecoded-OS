@@ -7,7 +7,7 @@ LD   = ld
 -include kernel/.config
 
 CFLAGS = -m64 -ffreestanding -fno-builtin -fno-stack-protector \
-         -fno-pic -mno-red-zone -mno-mmx -mno-sse -mno-sse2 \
+		 -fno-pic -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -mno-80387 \
          -Wall -Wextra -O2 -std=gnu99 \
          -Wno-unused-parameter -Wno-unused-function \
          -Wno-unused-variable -Wno-type-limits \
@@ -90,7 +90,7 @@ pigOS.iso: build/pig.bin
 	@echo "pigOS.iso ready!"
 
 run: pigOS.iso
-	qemu-system-x86_64 -cdrom pigOS.iso -m 128M -vga std -net nic,model=rtl8139 -net user,hostfwd=tcp::8080-:80,hostfwd=tcp::2222-:22 -usb -device usb-tablet
+	qemu-system-x86_64 -cdrom pigOS.iso -m 128M -vga std -netdev user,id=net0,dns=8.8.8.8,hostfwd=tcp::8080-:80,hostfwd=tcp::2222-:22 -device e1000,netdev=net0 -usb -device usb-tablet
 
 run-hostfwd: pigOS.iso
 	qemu-system-x86_64 -cdrom pigOS.iso -m 128M -vga std -net nic,model=rtl8139 -net user,hostfwd=tcp::5555-:55,hostfwd=tcp::8080-:80 -usb -device usb-tablet
@@ -108,7 +108,7 @@ run-socket: pigOS.iso
 	@echo "=== Socket-based networking ==="
 	@echo "Starting QEMU with TCP socket connection..."
 	@echo "Use: nc 127.0.0.1 12345 on another terminal to connect"
-	/home/User/.nix-profile/bin/qemu-system-x86_64 -cdrom pigOS.iso -m 128M -vga std -netdev socket,listen=127.0.0.1:12345,id=sock0 -net nic,model=rtl8139,netdev=sock0 -usb -device usb-tablet
+	qemu-system-x86_64 -cdrom pigOS.iso -m 128M -vga std -netdev socket,listen=127.0.0.1:12345,id=sock0 -device rtl8139,netdev=sock0 -usb -device usb-tablet
 
 run-tap: pigOS.iso
 	@echo "=== TAP Networking Setup ==="
@@ -121,10 +121,10 @@ run-tap: pigOS.iso
 	@echo "Host TAP IP: 10.0.3.1 (guest will be 10.0.3.15)"
 	@echo ""
 	@echo "Starting QEMU with TAP..."
-	/home/User/.nix-profile/bin/qemu-system-x86_64 -cdrom pigOS.iso -m 128M -vga std -net tap,ifname=tap0,script=no -net nic,model=rtl8139 -usb -device usb-tablet
+	qemu-system-x86_64 -cdrom pigOS.iso -m 128M -vga std -netdev tap,id=net0,ifname=tap0,script=no,downscript=no -device rtl8139,netdev=net0 -usb -device usb-tablet
 
 run-e1000: pigOS.iso
-	/home/User/.nix-profile/bin/qemu-system-x86_64 -cdrom pigOS.iso -m 128M -vga std -net nic,model=e1000 -net user -usb -device usb-tablet
+	qemu-system-x86_64 -cdrom pigOS.iso -m 128M -vga std -netdev user,id=net0 -device e1000,netdev=net0 -usb -device usb-tablet
 
 clean:
 	rm -rf build/ pigOS.iso iso/boot/pig.bin
