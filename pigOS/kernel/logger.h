@@ -51,7 +51,7 @@ static void log_get_entry(int n, char* out, int max){
     int idx = (log_index - log_count + n) % LOG_ENTRIES;
     int pos=0;
     // seq
-    char sb[8]; log_buffer[idx].seq; // simplified
+    char sb[8];
     // level
     for(int i=0;log_buffer[idx].level[i] && pos<max-1;){out[pos++]=log_buffer[idx].level[i++];}
     if(pos<max-1)out[pos++]=' ';

@@ -1,5 +1,7 @@
 #pragma once
 // larpshell v5.9.3 - Based on lash (github.com/usr-undeleted/lash)
+
+#include <stddef.h>
 #include "../drivers/vga/vga.h"
 #include "../drivers/ps2/ps2.h"
 #include "../kernel/mem.h"
@@ -86,7 +88,7 @@ static void sh_expand(const char*in,char*out,int outsz){
         if(in[i]=='$'){
             i++;
             char vn[32]; int vi=0;
-            while(in[i]&&(in[i]>='A'&&in[i]<='Z'||in[i]>='a'&&in[i]<='z'||in[i]>='0'&&in[i]<='9'||in[i]=='_')&&vi<31)
+            while(in[i] && ((in[i]>='A' && in[i]<='Z') || (in[i]>='a' && in[i]<='z') || (in[i]>='0' && in[i]<='9') || (in[i]=='_')) && vi < 31)
                 vn[vi++]=in[i++];
             vn[vi]=0;
             const char*val=sh_var_get(vn);
@@ -104,6 +106,17 @@ static void sh_expand(const char*in,char*out,int outsz){
         }
     }
     out[oi]=0;
+}
+
+// Simple integer to ASCII (base 10, no sign)
+static void kitoa(int val, char* out) {
+    char buf[12];
+    int i = 0;
+    if(val == 0) { out[0] = '0'; out[1] = 0; return; }
+    while(val > 0 && i < 11) { buf[i++] = '0' + (val % 10); val /= 10; }
+    int j = 0;
+    while(i > 0) out[j++] = buf[--i];
+    out[j] = 0;
 }
 
 const char* CMDS[]={
@@ -996,7 +1009,25 @@ void sh_dispatch(const char*raw_line){
             tcp_wget(a);
         }
     }
-    else if(!ksc(cmd,"nslookup")||!ksc(cmd,"dig")) {vps("Server: 8.8.8.8\nName: ");vpln(a&&*a?a:"?");}
+    else if(!ksc(cmd,"nslookup")||!ksc(cmd,"dig")) {
+        if(!a||!*a){vpln("Usage: nslookup <hostname>");}
+        else {
+            ip_addr_t ip;
+            extern int resolve_hostname_for_tools(const char*, ip_addr_t*);
+            int ok = resolve_hostname_for_tools(a, &ip);
+            if(ok==0){
+                vps("Server: 8.8.8.8\nName: ");vps(a);vps("\nAddress: ");
+                char ipbuf[32];
+                uint32_t addr = ip4_addr_get_u32(&ip);
+                kitoa((addr>>24)&0xFF,ipbuf);vps(ipbuf);vps(".");
+                kitoa((addr>>16)&0xFF,ipbuf);vps(ipbuf);vps(".");
+                kitoa((addr>>8)&0xFF,ipbuf);vps(ipbuf);vps(".");
+                kitoa((addr)&0xFF,ipbuf);vpln(ipbuf);
+            } else {
+                vps("Server: 8.8.8.8\nName: ");vps(a);vpln("\n*** No address found");
+            }
+        }
+    }
     else if(!ksc(cmd,"traceroute")) {vps("traceroute to ");vpln(a&&*a?a:"?");}
     else if(!ksc(cmd,"ss"))  vpln("tcp LISTEN 0.0.0.0:22");
     else if(!ksc(cmd,"arp")||!ksc(cmd,"route")) vpln("[no routing table - no carrier]");

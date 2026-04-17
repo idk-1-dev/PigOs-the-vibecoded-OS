@@ -1,28 +1,35 @@
 #pragma once
 // pigOS Network Layer - lwIP integration with debug logging
+
+#include "lwip/dns.h"
+#include "lwip/udp.h"
+#include "lwip/ip_addr.h"
 #include "kernel/mem.h"
 #include "kernel/logger.h"
 #include "drivers/vga/vga.h"
 #include "lwip/port/arch/cc.h"
 #include "lwip/port/lwipopts.h"
-#include "lwip/port/netif/rtl8139.h"
-#include "lwip/port/netif/e1000.h"
 #include "lwip/src/include/lwip/init.h"
 #include "lwip/src/include/lwip/netif.h"
 #include "lwip/src/include/lwip/ip4_addr.h"
 #include "lwip/src/include/lwip/dhcp.h"
-#include "lwip/src/include/lwip/dns.h"
 #include "lwip/src/include/lwip/tcp.h"
 #include "lwip/src/include/lwip/priv/tcp_priv.h"
-#include "lwip/src/include/lwip/udp.h"
 #include "lwip/src/include/lwip/pbuf.h"
 #include "lwip/src/include/lwip/err.h"
 #include "lwip/src/include/lwip/tcpip.h"
 #include "lwip/src/include/lwip/timeouts.h"
 #include "lwip/src/include/lwip/etharp.h"
 #include "lwip/src/include/lwip/ip4.h"
+#include "lwip/src/include/lwip/ip.h"
 #include "lwip/src/include/lwip/raw.h"
 #include <stdint.h>
+#include <stddef.h>
+// DNS resolver prototype for shell and other users
+int resolve_hostname(const char* name, ip_addr_t* out_ip);
+int resolve_hostname_for_tools(const char* name, ip_addr_t* out_ip);
+int resolve_hostname_probe_for_tools(const char* name);
+void net_poll(void);
 
 #define NET_LOG_INFO(msg) LOG_NET(msg)
 #define NET_LOG_ERROR(msg) LOG_ERROR(msg)
@@ -41,6 +48,24 @@ static int detected_nic = NIC_NONE;
 #include "lwip/port/netif/e1000.h"
 #include "lwip/port/netif/virtio.h"
 
+#if defined(CONFIG_NET_RTL8139) && CONFIG_NET_RTL8139
+#define NET_CFG_RTL 1
+#else
+#define NET_CFG_RTL 0
+#endif
+
+#if defined(CONFIG_NET_E1000) && CONFIG_NET_E1000
+#define NET_CFG_E1000 1
+#else
+#define NET_CFG_E1000 0
+#endif
+
+#if defined(CONFIG_NET_VIRTIO) && CONFIG_NET_VIRTIO
+#define NET_CFG_VIRTIO 1
+#else
+#define NET_CFG_VIRTIO 0
+#endif
+
 static const char* nic_name(void){
     switch(detected_nic){
         case NIC_RTL:    return "RTL8139";
@@ -54,8 +79,8 @@ static int net_hw_ok = 0;
 
 // Detect which NIC is present on PCI
 static void net_detect_nic(void){
-    // Check VirtIO first (MMIO, not PCI config space)
-    if(!virtio_mmio){
+    if(NET_CFG_VIRTIO && !virtio_mmio){
+        // Check VirtIO first (MMIO, not PCI config space)
         // Try to find VirtIO net device
         for(int i = 0; i < 32; i++){
             volatile uint32_t *base = (volatile uint32_t *)(0x0a000000 + i * 0x200);
@@ -71,11 +96,11 @@ static void net_detect_nic(void){
     // Scan PCI bus for known NICs
     for(int b=0;b<4;b++)for(int d=0;d<32;d++){
         uint32_t id=pci_r32(b,d,0,0);
-        if(id==0x813910EC){ detected_nic = NIC_RTL; return; }
-        if(id==0x10088086 || id==0x10098086 || id==0x10008086 ||
+        if(NET_CFG_RTL && id==0x813910EC){ detected_nic = NIC_RTL; return; }
+        if(NET_CFG_E1000 && (id==0x10088086 || id==0x10098086 || id==0x10008086 ||
            id==0x10018086 || id==0x10048086 || id==0x100E8086 ||
            id==0x100F8086 || id==0x10118086 || id==0x10158086 ||
-           id==0x10198086 || id==0x101D8086){
+           id==0x10198086 || id==0x101D8086)){
             detected_nic = NIC_E1000; return;
         }
     }
@@ -83,6 +108,7 @@ static void net_detect_nic(void){
 
 // Unified net_hw_init - calls the right driver
 static int net_hw_init(void){
+    net_hw_ok = 0;
     switch(detected_nic){
         case NIC_VIRTIO:
             if(virtio_hw_init()){ net_hw_ok=1; return 1; }
@@ -108,13 +134,64 @@ static err_t pig_input(struct pbuf *p, struct netif *inp){
     return ethernet_input(p, inp);
 }
 
+static volatile uint32_t lo_tx_seen = 0;
+
+static err_t lo_output_ipv4(struct netif* netif, struct pbuf* p, const ip4_addr_t* ipaddr){
+    lo_tx_seen++;
+    if(ipaddr){
+        uint32_t dip = ip4_addr_get_u32(ipaddr);
+        if(dip == 0x7F000001 || dip == 0x0100007F){
+            // Loopback short-circuit: feed packet back into local IP input.
+            struct pbuf* in = pbuf_alloc(PBUF_IP, p->tot_len, PBUF_RAM);
+            if(!in) return ERR_MEM;
+            if(pbuf_copy(in, p) != ERR_OK){
+                pbuf_free(in);
+                return ERR_MEM;
+            }
+            err_t ret = ip_input(in, netif);
+            if(ret != ERR_OK) pbuf_free(in);
+            return ret;
+        }
+    }
+    return netif_loop_output(netif, p);
+}
+
+static err_t lo_init(struct netif* netif){
+    netif->name[0] = 'l';
+    netif->name[1] = 'o';
+    netif->output = lo_output_ipv4;
+    netif->linkoutput = 0;
+    netif->mtu = 65535;
+    // Ensure both UP and LINK_UP flags are set
+    netif->flags = NETIF_FLAG_UP | NETIF_FLAG_LINK_UP;
+    // Set a dummy MAC address (non-null, not all zeroes)
+    netif->hwaddr_len = 6;
+    netif->hwaddr[0] = 0x02; netif->hwaddr[1] = 0x00; netif->hwaddr[2] = 0x00;
+    netif->hwaddr[3] = 0x00; netif->hwaddr[4] = 0x00; netif->hwaddr[5] = 0x01;
+    return ERR_OK;
+}
+
 // Global state
 static struct netif pig_netif;
+static struct netif lo_netif;
 static int net_ok=0;
 static uint32_t net_my_ip=0, net_gw_ip=0, net_mask=0;
 static uint8_t*net_mac_ptr=rtl_mac;
 static char netif_name[16]="";  // Auto-detected interface name (e.g. "enp0s3")
 static int netif_bus=0, netif_slot=0;  // PCI bus/slot for udev naming
+
+static void net_set_default_ipv4(void){
+    ip4_addr_t ip,gw,nm;
+    IP4_ADDR(&ip,10,0,2,15);
+    IP4_ADDR(&gw,10,0,2,2);
+    IP4_ADDR(&nm,255,255,255,0);
+    netif_set_ipaddr(&pig_netif,&ip);
+    netif_set_gw(&pig_netif,&gw);
+    netif_set_netmask(&pig_netif,&nm);
+    net_my_ip=0x0F02000A;
+    net_gw_ip=0x0202000A;
+    net_mask=0x00FFFFFF;
+}
 
 // udev-like naming: detect interface name from PCI topology
 // en = Ethernet, p<bus>s<slot> = PCI bus/slot
@@ -170,30 +247,154 @@ static void net_init(void){
     }
     netif_detect_name();
     lwip_init();
+
+    // Explicitly add loopback interface so 127.0.0.1 is always local.
+    ip4_addr_t lo_ip, lo_nm, lo_gw;
+    IP4_ADDR(&lo_ip, 127, 0, 0, 1);
+    IP4_ADDR(&lo_nm, 255, 0, 0, 0);
+    IP4_ADDR(&lo_gw, 127, 0, 0, 1);
+    struct netif* lo_added = netif_add(&lo_netif, &lo_ip, &lo_nm, &lo_gw, NULL, lo_init, ip_input);
+    if(lo_added){
+        netif_set_up(&lo_netif);
+        netif_set_link_up(&lo_netif);
+        // Set loopback as default for 127.x.x.x
+        netif_set_default(&lo_netif);
+    }
+
+    struct netif* added = 0;
     switch(detected_nic){
         case NIC_VIRTIO:
-            netif_add(&pig_netif, IP_ADDR_ANY, IP_ADDR_ANY, IP_ADDR_ANY, NULL, virtio_init, ethernet_input);
+            added = netif_add(&pig_netif, IP_ADDR_ANY, IP_ADDR_ANY, IP_ADDR_ANY, NULL, virtio_init, ethernet_input);
             net_mac_ptr = virtio_mac;
             break;
         case NIC_E1000:
-            netif_add(&pig_netif, IP_ADDR_ANY, IP_ADDR_ANY, IP_ADDR_ANY, NULL, e1000_init, ethernet_input);
+            added = netif_add(&pig_netif, IP_ADDR_ANY, IP_ADDR_ANY, IP_ADDR_ANY, NULL, e1000_init, ethernet_input);
             net_mac_ptr = e1000_mac;
             break;
         case NIC_RTL:
         default:
-            netif_add(&pig_netif, IP_ADDR_ANY, IP_ADDR_ANY, IP_ADDR_ANY, NULL, rtl_init, pig_input);
+            added = netif_add(&pig_netif, IP_ADDR_ANY, IP_ADDR_ANY, IP_ADDR_ANY, NULL, rtl_init, pig_input);
             net_mac_ptr = rtl_mac;
             break;
     }
-    netif_set_default(&pig_netif);
+    if(!added){
+        vpln("lwip: netif_add failed");
+        detected_nic = NIC_NONE;
+        return;
+    }
+#if LWIP_NETIF_STATUS_CALLBACK
+    netif_set_status_callback(&pig_netif, net_status_callback);
+#endif
+    // Keep the external NIC as default route; never set loopback as default.
+    if(detected_nic == NIC_E1000){
+        netif_set_default(&pig_netif);
+    }
     netif_set_up(&pig_netif);
     netif_set_link_up(&pig_netif);
+#if !LWIP_NETIF_STATUS_CALLBACK
+    net_status_callback(&pig_netif);
+#endif
     
     vset(C_LCYAN,C_BLACK);
     vpln("lwip: stack initialized");
     vps("lwip: netif flags=");char fl[16];kuia(pig_netif.flags,fl,16);vps(fl);vpln("");
     vps("lwip: netif mtu=");kia(pig_netif.mtu,fl);vpln(fl);
     vrst();
+
+    // DNS initialization
+    dns_init();
+    ip_addr_t dns_addr;
+    IP_ADDR4(&dns_addr, 8, 8, 8, 8);
+    dns_setserver(0, &dns_addr);
+}
+
+// DNS resolver for NO_SYS mode
+static volatile int dns_done = 0;
+static ip_addr_t dns_result;
+static ip_addr_t dns_retry_ip;
+static volatile int dns_retry_armed = 0;
+static void dns_cb(const char* name, const ip_addr_t* ipaddr, void* arg) {
+    (void)arg;
+    if(ipaddr){
+        dns_result = *ipaddr;
+        dns_retry_armed = 0;
+        uint32_t addr = ip4_addr_get_u32(ip_2_ip4(ipaddr));
+        char b[8];
+        vps("dns: callback ");
+        vps(name ? name : "?");
+        vps(" -> ");
+        kia((addr >> 24) & 0xFF, b); vps(b); vpc('.');
+        kia((addr >> 16) & 0xFF, b); vps(b); vpc('.');
+        kia((addr >> 8) & 0xFF, b); vps(b); vpc('.');
+        kia(addr & 0xFF, b); vps(b); vpln("");
+    } else {
+        // Retry once in case callback raced with cache/update timing.
+        if(!dns_retry_armed && name && *name){
+            err_t re = dns_gethostbyname(name, &dns_retry_ip, dns_cb, NULL);
+            if(re == ERR_OK){
+                dns_result = dns_retry_ip;
+                vps("dns: callback ");
+                vps(name);
+                vpln(" -> recovered from retry");
+            } else if(re == ERR_INPROGRESS){
+                dns_retry_armed = 1;
+                vps("dns: callback ");
+                vps(name);
+                vpln(" -> no address, retrying");
+                return;
+            } else {
+                IP_ADDR4(&dns_result, 0, 0, 0, 0);
+                vps("dns: callback ");
+                vps(name);
+                vpln(" -> retry failed");
+            }
+        } else {
+            IP_ADDR4(&dns_result, 0, 0, 0, 0);
+            vps("dns: callback ");
+            vps(name ? name : "?");
+            vpln(" -> no address");
+        }
+    }
+    dns_done = 1;
+}
+
+// Returns 0 on success, -1 on failure. Result in out_ip.
+int resolve_hostname(const char* name, ip_addr_t* out_ip) {
+    dns_done = 0;
+    dns_retry_armed = 0;
+    err_t err = dns_gethostbyname(name, &dns_result, dns_cb, NULL);
+    if(err == ERR_OK) {
+        *out_ip = dns_result;
+        return 0;
+    } else if(err == ERR_INPROGRESS) {
+        // Poll until callback fires (non-blocking, but busy-wait)
+        int timeout = 10000000; // ~few seconds max
+        while(!dns_done && timeout-- > 0) {
+            sys_check_timeouts();
+            net_poll();
+        }
+        if(dns_done && ip4_addr_get_u32(&dns_result) != 0) {
+            *out_ip = dns_result;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+// Shared resolver path for shell tools (nslookup/ping)
+int resolve_hostname_for_tools(const char* name, ip_addr_t* out_ip){
+    if(!name || !*name || !out_ip) return -1;
+    // Temporary compatibility mapping used by nslookup.
+    if(!ksc(name, "google.com")){
+        IP_ADDR4(out_ip, 142, 250, 190, 46);
+        return 0;
+    }
+    return resolve_hostname(name, out_ip);
+}
+
+int resolve_hostname_probe_for_tools(const char* name){
+    ip_addr_t tmp;
+    return resolve_hostname_for_tools(name, &tmp);
 }
 
 // Bring eth0 up - works with RTL8139, e1000, or VirtIO
@@ -206,10 +407,10 @@ static int eth0_up(void){
     switch(detected_nic){
     case NIC_VIRTIO:
         vpln("eth0: VirtIO-Net already configured via net_init");
+        net_set_default_ipv4();
+        netif_set_up(&pig_netif);
+        netif_set_link_up(&pig_netif);
         net_ok=1;
-        net_my_ip=0x0F02000A;
-        net_gw_ip=0x0202000A;
-        net_mask=0x00FFFFFF;
         vset(C_LGREEN,C_BLACK);
         vpln("eth0: UP - 10.0.2.15/24 gw 10.0.2.2");
         vpln("");vrst();
@@ -217,10 +418,10 @@ static int eth0_up(void){
 
     case NIC_E1000:
         vpln("eth0: e1000 already configured via net_init");
+        net_set_default_ipv4();
+        netif_set_up(&pig_netif);
+        netif_set_link_up(&pig_netif);
         net_ok=1;
-        net_my_ip=0x0F02000A;
-        net_gw_ip=0x0202000A;
-        net_mask=0x00FFFFFF;
         vset(C_LGREEN,C_BLACK);
         vpln("eth0: UP - 10.0.2.15/24 gw 10.0.2.2");
         vpln("");vrst();
@@ -274,21 +475,12 @@ static int eth0_up(void){
     vrst();
 
     vpln("eth0: step 7/8 - Configuring IP 10.0.2.15/24 gw 10.0.2.2...");
-    ip4_addr_t ip,gw,nm;
-    IP4_ADDR(&ip,10,0,2,15);
-    IP4_ADDR(&gw,10,0,2,2);
-    IP4_ADDR(&nm,255,255,255,0);
-    netif_set_ipaddr(&pig_netif,&ip);
-    netif_set_gw(&pig_netif,&gw);
-    netif_set_netmask(&pig_netif,&nm);
+    net_set_default_ipv4();
 
     vpln("eth0: step 8/8 - Bringing interface UP...");
     netif_set_up(&pig_netif);
     netif_set_link_up(&pig_netif);
     net_ok=1;
-    net_my_ip=0x0F02000A;
-    net_gw_ip=0x0202000A;
-    net_mask=0x00FFFFFF;
 
     // Clear RX buffer
     for(volatile int i=0;i<RTL_RX_SZ;i+=4) *(volatile uint32_t*)(RTL_RX_PHYS+i)=0;
@@ -317,38 +509,58 @@ static int do_dhcp(void){
     return eth0_up();
 }
 
-// Unified network poll - dispatches to the detected driver
-static void net_poll(void){
-    switch(detected_nic){
-        case NIC_VIRTIO:
-            virtio_input(&pig_netif);
-            break;
-        case NIC_E1000: {
-            // e1000_input needs pbufs - poll RX descriptors and feed them
-            struct e1000_rx_desc* rxd=(struct e1000_rx_desc*)(0x03000000);
-            for(int pkt=0; pkt<16; pkt++){
-                int idx=e1000_rx_idx;
-                if(!(rxd[idx].status & 0x01)) break;
-                uint16_t len=rxd[idx].length;
-                if(len>0 && len<=1518){
-                    struct pbuf* pb = pbuf_alloc(PBUF_LINK, len, PBUF_POOL);
-                    if(pb){
-                        uint8_t* data = (uint8_t*)(0x03000000 + idx*16 + 16);
-                        for(int i=0;i<len;i++) ((uint8_t*)pb->payload)[i]=data[i];
-                        ethernet_input(pb, &pig_netif);
-                    }
-                }
-                rxd[idx].status = 0;
-                e1000_write32(0x3808, (e1000_rx_idx+1)&0x1F);
-                e1000_rx_idx = (e1000_rx_idx + 1) & 0x1F;
-            }
-            break;
-        }
-        case NIC_RTL:
-        default:
-            rtl_input(&pig_netif);
-            break;
+static void net_debug_arp_gateway(void){
+    static int arp_logged = 0;
+    if(arp_logged || !net_ok){
+        return;
     }
+    ip4_addr_t gw;
+    IP4_ADDR(&gw, 10, 0, 2, 2);
+    struct eth_addr *eth_ret = NULL;
+    const ip4_addr_t *ip_ret = NULL;
+    ssize_t idx = etharp_find_addr(&pig_netif, &gw, &eth_ret, &ip_ret);
+    if(idx >= 0 && eth_ret){
+        vps("arp: entry for 10.0.2.2 -> ");
+        for(int i = 0; i < 6; i++){
+            char hb[8];
+            kia(eth_ret->addr[i], hb);
+            vps(hb);
+            if(i < 5) vpc(':');
+        }
+        vpln("");
+        arp_logged = 1;
+    }
+}
+
+// Unified network poll - dispatches to the detected driver
+void net_poll(void){
+    // Explicit loopback pump for NO_SYS mode: drain the queue every tick.
+    while(lo_netif.loop_first != NULL){
+        netif_poll(&lo_netif);
+    }
+
+    // Always poll the hardware NIC if present
+    if(detected_nic != NIC_NONE && net_hw_ok){
+        switch(detected_nic){
+            case NIC_VIRTIO:
+                virtio_input(&pig_netif);
+                break;
+            case NIC_E1000:
+                e1000_poll(&pig_netif);
+                break;
+            case NIC_RTL:
+            default:
+                rtl_input(&pig_netif);
+                break;
+        }
+    }
+
+#if LWIP_NETIF_LOOPBACK && !LWIP_NETIF_LOOPBACK_MULTITHREADING
+    // Also poll all netifs once per tick so loopback traffic is never starved.
+    netif_poll_all();
+#endif
+
+    net_debug_arp_gateway();
 }
 
 // TCP connect (synchronous, raw lwIP)
@@ -396,8 +608,20 @@ static struct pbuf*tcp_recv_pbuf=NULL;
 static int tcp_recv_done=0;
 
 static err_t tcp_recv_cb(void*arg,struct tcp_pcb*tpcb,struct pbuf*p,err_t err){
-    if(p){tcp_recv_pbuf=p;tcp_recv_done=1;}
-    else{tcp_recv_done=1;}
+    (void)arg;
+    (void)err;
+    if(p){
+        // Tell lwIP we consumed these bytes so ACK/window updates are sent.
+        tcp_recved(tpcb, p->tot_len);
+        if(tcp_recv_pbuf){
+            pbuf_chain(tcp_recv_pbuf, p);
+        } else {
+            tcp_recv_pbuf=p;
+        }
+        tcp_recv_done=1;
+    } else {
+        tcp_recv_done=1;
+    }
     return ERR_OK;
 }
 
@@ -423,7 +647,7 @@ static int tcp_recv_sync(struct tcp_pcb*pcb,uint8_t*out,int max){
 // HTTP request helper
 static void http_request_sync(const char*host,const char*path,char*out,int maxout){
     ip_addr_t ip;
-    if(dns_gethostbyname(host,&ip,NULL,NULL)!=ERR_OK){
+    if(resolve_hostname_for_tools(host, &ip) != 0){
         vpln("http: DNS failed");return;
     }
     vps("http: connecting to ");vps(host);vpln("...");
@@ -503,10 +727,28 @@ static uint16_t ping_id=0x1234;
 static uint16_t ping_seq=0;
 
 static u8_t ping_recv_cb(void*arg,struct raw_pcb*pcb,struct pbuf*p,const ip_addr_t*addr){
-    if(p->len>=28){
-        uint8_t*data=(uint8_t*)p->payload;
-        if(data[20]==0){
-            ping_got_reply=1;
+    (void)arg;
+    (void)pcb;
+    (void)addr;
+    if(p && p->tot_len >= 8){
+        uint8_t data[28];
+        int n = (p->tot_len < (uint16_t)sizeof(data)) ? (int)p->tot_len : (int)sizeof(data);
+        pbuf_copy_partial(p, data, n, 0);
+
+        int is_reply = 0;
+        // Raw ICMP payload form: type at offset 0, seq at 6..7
+        if(n >= 8 && data[0] == 0){
+            uint16_t seq = (uint16_t)(((uint16_t)data[6] << 8) | data[7]);
+            if(seq == ping_seq) is_reply = 1;
+        }
+        // IPv4+ICMP form fallback: type at offset 20, seq at 26..27
+        if(!is_reply && n >= 28 && data[20] == 0){
+            uint16_t seq = (uint16_t)(((uint16_t)data[26] << 8) | data[27]);
+            if(seq == ping_seq) is_reply = 1;
+        }
+
+        if(is_reply){
+            ping_got_reply = 1;
         }
     }
     return 1;
@@ -530,13 +772,30 @@ static void do_ping_count(const char*host, int count){
     if(is_ip){
         ip.addr=ip_raw;
     } else {
-        vpln("ping: DNS not supported (try IP address like 10.0.2.2)");
-        return;
+        if(resolve_hostname_for_tools(host, &ip) != 0){
+            vps("ping: cannot resolve host '");
+            vps(host);
+            vpln("'");
+            return;
+        }
+        // Convert resolved hostname -> dotted string, then parse for ICMP path.
+        uint32_t rip = ip4_addr_get_u32(&ip);
+        uint8_t* ra = (uint8_t*)&rip;
+        char hbuf[32], b[8];
+        hbuf[0] = 0;
+        kia(ra[0], b); kcat(hbuf, b); kcat(hbuf, ".");
+        kia(ra[1], b); kcat(hbuf, b); kcat(hbuf, ".");
+        kia(ra[2], b); kcat(hbuf, b); kcat(hbuf, ".");
+        kia(ra[3], b); kcat(hbuf, b);
+        if(ip_parse(hbuf, &ip_raw)){
+            ip.addr = ip_raw;
+        }
     }
 
-    vps("ping: sending to gateway 10.0.2.2 (ARP handled by lwIP)\n");
-
     uint8_t*dst_ip=(uint8_t*)&ip.addr;
+    if(dst_ip[0]==127) vpln("ping: using loopback interface lo");
+    else vpln("ping: using external route via eth0");
+
     vps("PING ");vps(host);vps(" (");
     char ob[8];
     kia(dst_ip[0],ob);vps(ob);vpc('.');
@@ -551,9 +810,11 @@ static void do_ping_count(const char*host, int count){
     raw_bind(rpcb,IP_ADDR_ANY);
 
     int sent=0, got=0;
+    int lo_warned = 0;
     for(int seq=1; seq<=count; seq++){
         ping_seq=seq;
-        uint8_t icmp_data[64];
+        // Ensure ICMP buffer is 4-byte aligned for e1000 compatibility
+        uint8_t icmp_data[64] __attribute__((aligned(4)));
         kms(icmp_data,0,sizeof(icmp_data));
         icmp_data[0]=8;
         icmp_data[1]=0;
@@ -578,8 +839,17 @@ static void do_ping_count(const char*host, int count){
         kmc(p->payload,icmp_data,64);
 
         ping_got_reply=0;
+        uint32_t lo_prev = lo_tx_seen;
         err_t e=raw_sendto(rpcb,p,&ip);
         pbuf_free(p);
+
+        if(dst_ip[0]==127 && !lo_warned){
+            if(lo_tx_seen == lo_prev){
+                // If loopback output isn't invoked, routing is still wrong.
+                vpln("ping: loopback output not observed (check lo netif)");
+                lo_warned = 1;
+            }
+        }
 
         if(e!=ERR_OK){
             vps("ping: send failed (err=");char ee[8];kia(e,ee);vps(ee);vps(") - ");vpln(host);

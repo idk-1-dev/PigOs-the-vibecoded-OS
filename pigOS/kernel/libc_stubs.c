@@ -1,6 +1,7 @@
 // pigOS libc stubs for lwIP
 #include <stdint.h>
 #include <stddef.h>
+#include "libc_stubs.h"
 
 void*pig_memcpy(void*dst,const void*src,unsigned long n){
     unsigned char*d=(unsigned char*)dst;const unsigned char*s=(const unsigned char*)src;
@@ -42,6 +43,17 @@ int pig_strncmp(const char*s1,const char*s2,unsigned long n){
     return 0;
 }
 
+int pig_strcmp(const char*s1,const char*s2){
+    while(*s1 && (*s1 == *s2)){ s1++; s2++; }
+    return (unsigned char)*s1 - (unsigned char)*s2;
+}
+
+char* pig_strcpy(char*dst,const char*src){
+    char*ret=dst;
+    while((*dst++=*src++));
+    return ret;
+}
+
 long pig_strtol(const char*nptr,char**endptr,int base){
     long val=0;int neg=0;const char*p=nptr;
     while(*p==' '||*p=='\t')p++;
@@ -75,3 +87,14 @@ const unsigned short**__ctype_b_loc(void){return &_pig_ctype_b_ptr;}
 static const int _pig_ctype_tolower[256]={0};
 static const int*_pig_ctype_tolower_ptr=_pig_ctype_tolower;
 const int**__ctype_tolower_loc(void){return &_pig_ctype_tolower_ptr;}
+
+// Standard libc symbol wrappers used by lwIP and other objects.
+void* memcpy(void*dst,const void*src,size_t n){ return pig_memcpy(dst,src,(unsigned long)n); }
+void* memmove(void*dst,const void*src,size_t n){ return pig_memmove(dst,src,(unsigned long)n); }
+void* memset(void*s,int c,size_t n){ return pig_memset(s,c,(unsigned long)n); }
+int memcmp(const void*s1,const void*s2,size_t n){ return pig_memcmp(s1,s2,(unsigned long)n); }
+size_t strlen(const char*s){ return (size_t)pig_strlen(s); }
+int strncmp(const char*s1,const char*s2,size_t n){ return pig_strncmp(s1,s2,(unsigned long)n); }
+int strcmp(const char*s1,const char*s2){ return pig_strcmp(s1,s2); }
+char* strcpy(char*dst,const char*src){ return pig_strcpy(dst,src); }
+long strtol(const char*nptr,char**endptr,int base){ return pig_strtol(nptr,endptr,base); }

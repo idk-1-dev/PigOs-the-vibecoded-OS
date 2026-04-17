@@ -48,12 +48,12 @@ static void dock_robin(){ /* handled by F3 */ }
 static void dock_power(){ /* handled by F5 */ }
 
 static DockIcon dock[]={
-    {3,  "Term",     0x01, COL(C_LGREEN,C_LGREEN)},
-    {12, "Files",    0x02, COL(C_LBLUE,C_LBLUE)},
-    {21, "Browser",  0x03, COL(C_LCYAN,C_LCYAN)},
-    {30, "Settings", 0x04, COL(C_LMAG,C_LMAG)},
-    {39, "Browser2", 0x05, COL(C_YELLOW,C_YELLOW)},
-    {48, "Power",    0x06, COL(C_LRED,C_LRED)},
+    {3,  "Term",     0x01, COL(C_LGREEN,C_LGREEN), dock_terminal},
+    {12, "Files",    0x02, COL(C_LBLUE,C_LBLUE), NULL},
+    {21, "Browser",  0x03, COL(C_LCYAN,C_LCYAN), NULL},
+    {30, "Settings", 0x04, COL(C_LMAG,C_LMAG), NULL},
+    {39, "Browser2", 0x05, COL(C_YELLOW,C_YELLOW), NULL},
+    {48, "Power",    0x06, COL(C_LRED,C_LRED), NULL},
 };
 static int dock_selected=-1;
 

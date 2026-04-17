@@ -288,11 +288,10 @@ static void lash_loop(){
     while(1){
         ps2_poll();
         
-        // Network polling - check for RX packets periodically
-        extern void rtl_input(struct netif*);
-        extern struct netif pig_netif;
-        extern int net_ok;
-        if(net_ok){rtl_input(&pig_netif);}
+    #ifdef CONFIG_LWIP
+        sys_check_timeouts();
+        net_poll();
+    #endif
         
         if(!kb_avail()){
             ps2_poll();

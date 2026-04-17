@@ -11,13 +11,16 @@ static void cmd_netpg(const char*args){
         vpln("--------------------------------");
         vset(C_LGREEN,C_BLACK); vps("lo        "); vrst();
         vpln("LOOPBACK  UP   127.0.0.1/8");
-#if USE_E1000
-        if(e1000_hw_ok){ vset(C_LGREEN,C_BLACK); vps("eth0      "); vrst(); vps("e1000     UP   "); net_print_ip(net_my_ip); vps("  HW:"); vps("XX:XX:XX:XX:XX:XX"); }
+    if(detected_nic==NIC_E1000){
+        if(net_ok){ vset(C_LGREEN,C_BLACK); vps("eth0      "); vrst(); vps("e1000     UP   "); net_print_ip(net_my_ip); vps("  HW:"); vps("XX:XX:XX:XX:XX:XX"); }
         else { vset(C_YELLOW,C_BLACK); vps("eth0      "); vrst(); vpln("e1000     DOWN  [no carrier]"); }
-#else
+    } else if(detected_nic==NIC_VIRTIO){
+        if(net_ok){ vset(C_LGREEN,C_BLACK); vps("eth0      "); vrst(); vps("VirtIO    UP   "); net_print_ip(net_my_ip); vps("  HW:"); vps("XX:XX:XX:XX:XX:XX"); }
+        else { vset(C_YELLOW,C_BLACK); vps("eth0      "); vrst(); vpln("VirtIO    DOWN  [no carrier]"); }
+    } else {
         if(net_ok){ vset(C_LGREEN,C_BLACK); vps("eth0      "); vrst(); vps("RTL8139   UP   "); net_print_ip(net_my_ip); vps("  HW:"); vps("XX:XX:XX:XX:XX:XX"); }
         else { vset(C_YELLOW,C_BLACK); vps("eth0      "); vrst(); vpln("RTL8139   DOWN  [no carrier]"); }
-#endif
+    }
         return;
     }
 
@@ -37,11 +40,11 @@ static void cmd_netpg(const char*args){
     } else if(!ksc(sub,"up")){
         vps("netpg: bringing up ");
         vpln(*iface?iface:"eth0");
-#if USE_E1000
-        if(!e1000_hw_ok) vpln("  [no carrier - start QEMU with: -net nic,model=e1000 -net user]");
-#else
-        if(!net_ok) vpln("  [no carrier - start QEMU with: -net nic,model=rtl8139 -net user]");
-#endif
+    if(!net_ok){
+        if(detected_nic==NIC_E1000) vpln("  [no carrier - start QEMU with: -net nic,model=e1000 -net user]");
+        else if(detected_nic==NIC_VIRTIO) vpln("  [no carrier - start QEMU with: -netdev user,id=net0 -device virtio-net-pci,netdev=net0]");
+        else vpln("  [no carrier - start QEMU with: -net nic,model=rtl8139 -net user]");
+    }
         else vpln("  [up]");
     } else if(!ksc(sub,"down")){
         vps("netpg: bringing down "); vpln(*iface?iface:"eth0");
@@ -66,11 +69,9 @@ static void cmd_netpg(const char*args){
     } else if(!ksc(sub,"scan")){
         vpln("netpg: scanning...");
         vpln("  lo    loopback");
-#if USE_E1000
-        vpln("  eth0  e1000     PCI 00:02.0");
-#else
-        vpln("  eth0  RTL8139 PCI 00:03.0");
-#endif
+    if(detected_nic==NIC_E1000) vpln("  eth0  e1000     PCI 00:02.0");
+    else if(detected_nic==NIC_VIRTIO) vpln("  eth0  VirtIO    PCI/MMIO");
+    else vpln("  eth0  RTL8139   PCI 00:03.0");
     } else if(!ksc(sub,"help")){
         vpln("netpg commands:");
         vpln("  (none)     - show interface status");

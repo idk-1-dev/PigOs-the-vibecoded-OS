@@ -263,18 +263,23 @@ static int virtio_hw_init(void) {
 }
 
 static err_t virtio_output(struct netif*netif, struct pbuf*p){
+    (void)netif;
     if(!virtio_hw_ok) return ERR_IF;
     
     extern void*pig_memcpy(void*,const void*,unsigned long);
     extern void*pig_memset(void*,int,unsigned long);
     pig_memset(&tx_buffer.hdr, 0, sizeof(virtio_net_hdr_t));
     
-    for(int i = 0; i < p->len && i < 1514; i++) {
-        tx_buffer.data[i] = ((uint8_t*)p->payload)[i];
+    int off = 0;
+    for(struct pbuf* q = p; q != NULL && off < 1514; q = q->next){
+        int c = q->len;
+        if(off + c > 1514) c = 1514 - off;
+        for(int i = 0; i < c; i++) tx_buffer.data[off + i] = ((uint8_t*)q->payload)[i];
+        off += c;
     }
     
     tx_desc[0].addr = (uint64_t)&tx_buffer;
-    tx_desc[0].len = sizeof(virtio_net_hdr_t) + p->len;
+    tx_desc[0].len = sizeof(virtio_net_hdr_t) + (uint32_t)off;
     tx_desc[0].flags = 0;
     tx_desc[0].next = 0;
     

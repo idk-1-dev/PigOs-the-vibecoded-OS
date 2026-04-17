@@ -133,11 +133,11 @@ static int x509_parse_cert(X509Cert*cert, const uint8_t*der, uint32_t dlen){
     Asn1Node*tbs=asn1_child(&t,root,0);
     if(!tbs||tbs->tag!=0x30) return -1;
     Asn1Node*ver=asn1_child(&t,tbs,0);
-    int issuer_idx=1, serial_idx=1, sigalg_idx=2, issuer_off=3, validity_off=4, subject_off=5, pubkey_off=6;
+    int subject_off=5, validity_off=4, pubkey_off=6;
     if(ver&&ver->tag==0xA0){
-        issuer_off=4; validity_off=5; subject_off=6; pubkey_off=7;
+        validity_off=5; subject_off=6; pubkey_off=7;
     } else {
-        issuer_off=3; validity_off=4; subject_off=5; pubkey_off=6;
+        validity_off=4; subject_off=5; pubkey_off=6;
     }
     Asn1Node*subject=asn1_child(&t,tbs,subject_off);
     if(subject){
